@@ -453,61 +453,52 @@ def calculate_duration(started_at: str, completed_at: str) -> str:
 
 
 def calculate_queue_time(
-    created_at: str,
-    started_at: str,
-    status: str = None,
+    job: dict,
     report_time: datetime = None,
 ) -> str:
     """
-    Calculate queue time between creation and start.
+    Calculate queue time for a job.
 
-    For queued/waiting jobs that haven't truly started yet, calculate
-    queue time as (report_time - created_at) and mark as "still queuing".
+    Uses ``runner_name`` as the reliable signal for whether a runner
+    picked the job up (consistent with ``_queue_time_seconds``):
+
+    * **Has runner** (job was picked up): ``started_at - created_at``.
+    * **No runner + queued/waiting** (still in queue):
+      ``report_time - created_at``, suffixed with "(queuing)".
+    * **No runner + other status** (skipped / cancelled / stuck):
+      returns "-" (never truly queued for a runner).
     """
-    if not created_at:
-        return "-"
-
-    created = parse_time(created_at)
+    created = parse_time(job.get("created_at", ""))
     if not created:
         return "-"
 
-    # For queued/waiting jobs, calculate time since creation
-    if status in ("queued", "waiting"):
-        if report_time:
-            queue_seconds = (report_time - created).total_seconds()
-        else:
-            queue_seconds = (datetime.now(timezone.utc) - created).total_seconds()
+    runner = job.get("runner_name") or ""
+    has_runner = runner and runner != "-"
 
+    if has_runner:
+        started = parse_time(job.get("started_at", ""))
+        if not started:
+            return "-"
+        queue_seconds = (started - created).total_seconds()
+        if queue_seconds < 0:
+            return "-"  # re-run; timestamps unreliable
+    else:
+        status = job.get("status", "")
+        if status not in ("queued", "waiting"):
+            return "-"
+        ref = report_time or datetime.now(timezone.utc)
+        queue_seconds = (ref - created).total_seconds()
         if queue_seconds < 0:
             return "-"
 
-        minutes = int(queue_seconds // 60)
-        seconds = int(queue_seconds % 60)
-        if minutes >= 60:
-            hours = minutes // 60
-            minutes = minutes % 60
-            return f"{hours}h{minutes}m (queuing)"
-        return f"{minutes}m{seconds}s (queuing)"
-
-    # For completed/in_progress jobs, calculate actual queue time
-    if not started_at:
-        return "-"
-
-    started = parse_time(started_at)
-    if not started:
-        return "-"
-
-    queue_seconds = (started - created).total_seconds()
-    if queue_seconds < 0:
-        return "-"  # Invalid data
-
     minutes = int(queue_seconds // 60)
     seconds = int(queue_seconds % 60)
+    suffix = " (queuing)" if not has_runner else ""
     if minutes >= 60:
         hours = minutes // 60
         minutes = minutes % 60
-        return f"{hours}h{minutes}m"
-    return f"{minutes}m{seconds}s"
+        return f"{hours}h{minutes}m{suffix}"
+    return f"{minutes}m{seconds}s{suffix}"
 
 
 # ---------------------------------------------------------------------------
@@ -864,10 +855,9 @@ def analyze_utilization_snapshots(
                 if created and created < started:
                     queued_events.append((created, +1))
                     queued_events.append((started, -1))
-            elif created:
-                end = completed if completed else report_time
+            elif created and job.get("status") in ("queued", "waiting"):
                 queued_events.append((created, +1))
-                queued_events.append((end, -1))
+                queued_events.append((report_time, -1))
 
         sorted_running = sorted(running_events, key=lambda x: (x[0], x[1]))
         sorted_queued = sorted(queued_events, key=lambda x: (x[0], x[1]))
@@ -953,15 +943,17 @@ def process_results(
                 "success": 0,
                 "failure": 0,
                 "cancelled": 0,
+                "skipped": 0,
             }
         if is_stuck:
             status_summary[job_name]["stuck"] += 1
         elif status == "completed":
-            # For completed jobs, count by conclusion
             if conclusion == "success":
                 status_summary[job_name]["success"] += 1
             elif conclusion == "failure":
                 status_summary[job_name]["failure"] += 1
+            elif conclusion == "skipped":
+                status_summary[job_name]["skipped"] += 1
             elif conclusion in ("cancelled", "timed_out", "action_required"):
                 status_summary[job_name]["cancelled"] += 1
         elif status in status_summary[job_name]:
@@ -992,8 +984,7 @@ def process_results(
         processed = r.copy()
         processed["created_formatted"] = format_time(r["created_at"])
         processed["started_formatted"] = format_time(r["started_at"])
-        processed["queue_time"] = calculate_queue_time(
-            r["created_at"], r["started_at"], r["status"], report_time
+        processed["queue_time"] = calculate_queue_time(r, report_time
         )
         processed["duration"] = calculate_duration(r["started_at"], r["completed_at"])
         # Use the job's html_url for direct link to the specific job
@@ -1159,6 +1150,7 @@ def print_table(
                 counts["success"],
                 counts["failure"],
                 counts["cancelled"],
+                counts["skipped"],
             ]
         )
 
@@ -1174,6 +1166,7 @@ def print_table(
                 "Success",
                 "Failure",
                 "Cancelled",
+                "Skipped",
             ],
             tablefmt="grid",
         )
@@ -1345,14 +1338,14 @@ def format_markdown(
     lines.append("## Summary by Job Name")
     lines.append("")
     lines.append(
-        "> **Status meanings:** Running = executing, Queued = waiting for runner, Waiting = waiting for dependent jobs, Stuck = ghost job, Cancelled = cancelled/timed_out"
+        "> **Status meanings:** Running = executing, Queued = waiting for runner, Waiting = waiting for dependent jobs, Stuck = ghost job, Cancelled = cancelled/timed_out, Skipped = skipped by workflow conditions"
     )
     lines.append("")
     lines.append(
-        "| Job Name | Running | Queued | Waiting | Stuck | Success | Failure | Cancelled |"
+        "| Job Name | Running | Queued | Waiting | Stuck | Success | Failure | Cancelled | Skipped |"
     )
     lines.append(
-        "|----------|---------|--------|---------|-------|---------|---------|-----------|"
+        "|----------|---------|--------|---------|-------|---------|---------|-----------|---------|"
     )
 
     for job_name, counts in sorted(status_summary.items()):
@@ -1363,8 +1356,9 @@ def format_markdown(
         success = str(counts["success"])
         failure = f"**{counts['failure']}**" if counts["failure"] > 0 else "0"
         cancelled = str(counts["cancelled"])
+        skipped = str(counts["skipped"])
         lines.append(
-            f"| `{job_name}` | {running} | {queued} | {waiting} | {stuck} | {success} | {failure} | {cancelled} |"
+            f"| `{job_name}` | {running} | {queued} | {waiting} | {stuck} | {success} | {failure} | {cancelled} | {skipped} |"
         )
 
     lines.append("")
@@ -1663,9 +1657,7 @@ def format_runner_report_markdown(
             "|----------|--------|---------|-------|----------|-----------|------|"
         )
         for j in sorted(failed_jobs, key=lambda x: x["created_at"], reverse=True):
-            queue = calculate_queue_time(
-                j["created_at"], j["started_at"], j["status"], report_time
-            )
+            queue = calculate_queue_time(j, report_time)
             dur = calculate_duration(j["started_at"], j["completed_at"])
             pr_info = (
                 f"PR#{j['pr_number']}" if j.get("pr_number") else j.get("branch", "-")
@@ -1881,9 +1873,7 @@ def main():
             "job_name,status,is_stuck,conclusion,created_at,started_at,queue_time,duration,runner,run_status,run_conclusion,pr_number,branch,url"
         ]
         for r in sorted(results, key=lambda x: x["created_at"], reverse=True):
-            queue_time = calculate_queue_time(
-                r["created_at"], r["started_at"], r["status"], report_time
-            )
+            queue_time = calculate_queue_time(r, report_time)
             duration = calculate_duration(r["started_at"], r["completed_at"])
             is_stuck = "true" if r.get("is_stuck", False) else "false"
             lines.append(
@@ -1895,9 +1885,7 @@ def main():
         json_results = []
         for r in sorted(results, key=lambda x: x["created_at"], reverse=True):
             r_copy = r.copy()
-            r_copy["queue_time"] = calculate_queue_time(
-                r["created_at"], r["started_at"], r["status"], report_time
-            )
+            r_copy["queue_time"] = calculate_queue_time(r, report_time)
             r_copy["duration"] = calculate_duration(r["started_at"], r["completed_at"])
             r_copy["created_at_formatted"] = format_time(r["created_at"])
             r_copy["started_at_formatted"] = format_time(r["started_at"])
