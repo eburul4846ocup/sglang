@@ -23,7 +23,7 @@ This skill owns the ModelOpt-to-SGLang bridge. It is not a generic kernel-tuning
 - Benchmark only when BF16 and quantized commands are identical except for the checkpoint override being tested.
 - For diffusion FP8, pin `dit_cpu_offload=false` and `dit_layerwise_offload=false`.
 - For multi-transformer pipelines, use per-component overrides when different components need different checkpoints.
-- When a branch is missing the validated helper tools, refresh `python/sglang/multimodal_gen/tools/convert_modelopt_fp8_checkpoint.py`, `python/sglang/multimodal_gen/tools/convert_hf_to_fp8.py`, `python/sglang/multimodal_gen/tools/build_modelopt_nvfp4_mixed_transformer.py`, and `python/sglang/multimodal_gen/tools/compare_diffusion_trajectory_similarity.py` instead of inventing one-off scripts elsewhere.
+- When a branch is missing the validated helper tools, refresh `python/sglang/multimodal_gen/tools/convert_modelopt_fp8_checkpoint.py`, `python/sglang/multimodal_gen/tools/build_modelopt_nvfp4_mixed_transformer.py`, and `python/sglang/multimodal_gen/tools/compare_diffusion_trajectory_similarity.py` instead of inventing one-off scripts elsewhere.
 - After validating a new ModelOpt quant path, update the ModelOpt support matrix in `docs/diffusion/quantization.md` before closing the task.
 
 ## Read First
@@ -39,7 +39,6 @@ Read these sources before changing code:
   - `python/sglang/multimodal_gen/runtime/loader/transformer_load_utils.py`
 - Helper tools in this repo:
   - [`python/sglang/multimodal_gen/tools/convert_modelopt_fp8_checkpoint.py`](../../../tools/convert_modelopt_fp8_checkpoint.py)
-  - [`python/sglang/multimodal_gen/tools/convert_hf_to_fp8.py`](../../../tools/convert_hf_to_fp8.py)
   - [`python/sglang/multimodal_gen/tools/build_modelopt_nvfp4_mixed_transformer.py`](../../../tools/build_modelopt_nvfp4_mixed_transformer.py)
   - [`python/sglang/multimodal_gen/tools/compare_diffusion_trajectory_similarity.py`](../../../tools/compare_diffusion_trajectory_similarity.py)
 
