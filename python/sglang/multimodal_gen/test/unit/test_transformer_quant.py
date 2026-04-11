@@ -43,10 +43,10 @@ sys.modules.setdefault(
 )
 sys.modules.setdefault("partial_json_parser.core.options", partial_json_parser_options)
 
+from sglang.multimodal_gen.runtime.layers.linear import UnquantizedLinearMethod
 from sglang.multimodal_gen.runtime.layers.quantization.configs.nunchaku_config import (
     NunchakuConfig,
 )
-from sglang.multimodal_gen.runtime.layers.linear import UnquantizedLinearMethod
 from sglang.multimodal_gen.runtime.layers.quantization.modelopt_quant import (
     ModelOptFp4Config,
     _prepare_nvfp4_weight_bytes,
@@ -58,7 +58,7 @@ from sglang.multimodal_gen.runtime.loader.transformer_load_utils import (
     resolve_transformer_safetensors_to_load,
 )
 from sglang.multimodal_gen.runtime.models.dits.flux import FluxSingleTransformerBlock
-from sglang.multimodal_gen.tools.build_modelopt_nvfp4_mixed_transformer import (
+from sglang.multimodal_gen.tools.build_modelopt_nvfp4_transformer import (
     _updated_quant_config,
 )
 
@@ -247,7 +247,9 @@ class TestTransformerQuantHelpers(unittest.TestCase):
 
     @patch("sglang.multimodal_gen.runtime.layers.linear.get_group_rank", return_value=0)
     @patch("sglang.multimodal_gen.runtime.layers.linear.get_group_size", return_value=1)
-    @patch("sglang.multimodal_gen.runtime.layers.linear.get_tp_group", return_value=None)
+    @patch(
+        "sglang.multimodal_gen.runtime.layers.linear.get_tp_group", return_value=None
+    )
     def test_flux_single_transformer_block_modelopt_excludes_use_full_prefix(
         self,
         _mock_tp_group,
@@ -273,13 +275,11 @@ class TestTransformerQuantHelpers(unittest.TestCase):
             prefix="single_transformer_blocks.0",
         )
 
+        self.assertEqual(block.proj_mlp.prefix, "single_transformer_blocks.0.proj_mlp")
+        self.assertEqual(block.proj_out.prefix, "single_transformer_blocks.0.proj_out")
         self.assertEqual(
-            block.proj_mlp.prefix, "single_transformer_blocks.0.proj_mlp"
+            block.attn.to_q.prefix, "single_transformer_blocks.0.attn.to_q"
         )
-        self.assertEqual(
-            block.proj_out.prefix, "single_transformer_blocks.0.proj_out"
-        )
-        self.assertEqual(block.attn.to_q.prefix, "single_transformer_blocks.0.attn.to_q")
         self.assertIsInstance(block.proj_mlp.quant_method, UnquantizedLinearMethod)
         self.assertIsInstance(block.proj_out.quant_method, UnquantizedLinearMethod)
         self.assertIsInstance(block.attn.to_q.quant_method, UnquantizedLinearMethod)

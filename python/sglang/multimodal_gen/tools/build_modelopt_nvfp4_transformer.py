@@ -1,8 +1,8 @@
-"""Build a mixed BF16 + ModelOpt NVFP4 diffusion transformer checkpoint.
+"""Build an SGLang-loadable ModelOpt NVFP4 diffusion transformer.
 
 This tool keeps the ModelOpt-exported NVFP4 tensors for most transformer
-modules, but replaces a validated subset of numerically sensitive modules with
-their original BF16 tensors from the base transformer checkpoint.
+modules, but can replace a validated subset of numerically sensitive modules
+with their original BF16 tensors from the base transformer checkpoint.
 
 It is primarily intended for FLUX.1-dev style ModelOpt NVFP4 exports where:
 - the base pipeline should remain separate from the quantized transformer
@@ -193,12 +193,14 @@ def _updated_quant_config(
             ignore_patterns.append(pattern)
 
     quant_config["ignore"] = ignore_patterns
-    quant_config.setdefault("quant_type", str(quant_config.get("quant_algo", "")).upper())
+    quant_config.setdefault(
+        "quant_type", str(quant_config.get("quant_algo", "")).upper()
+    )
     quant_config["swap_weight_nibbles"] = swap_weight_nibbles
     return output_config
 
 
-def build_modelopt_nvfp4_mixed_transformer(
+def build_modelopt_nvfp4_transformer(
     *,
     base_transformer_dir: str,
     modelopt_hf_dir: str,
@@ -331,8 +333,8 @@ def build_modelopt_nvfp4_mixed_transformer(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a mixed BF16 + ModelOpt NVFP4 diffusion transformer checkpoint "
-            "that keeps selected modules in BF16."
+            "Build an SGLang-loadable ModelOpt NVFP4 diffusion transformer and "
+            "optionally keep selected modules in BF16."
         )
     )
     parser.add_argument(
@@ -384,7 +386,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    stats = build_modelopt_nvfp4_mixed_transformer(
+    stats = build_modelopt_nvfp4_transformer(
         base_transformer_dir=args.base_transformer_dir,
         modelopt_hf_dir=args.modelopt_hf_dir,
         output_dir=args.output_dir,

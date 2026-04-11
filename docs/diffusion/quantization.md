@@ -66,7 +66,7 @@ here instead of duplicating them in workflow skills.
 
 | Base Model | Validated Scope | HF DiT Weights | Notes |
 | --- | --- | --- | --- |
-| `black-forest-labs/FLUX.1-dev` | mixed BF16+NVFP4 transformer override, correctness validation, 4x RTX 5090 benchmark, torch-profiler trace | `unpublished` | use `build_modelopt_nvfp4_mixed_transformer.py`; validated builder keeps selected FLUX.1 modules in BF16 and sets `swap_weight_nibbles=false` |
+| `black-forest-labs/FLUX.1-dev` | mixed BF16+NVFP4 transformer override, correctness validation, 4x RTX 5090 benchmark, torch-profiler trace | `unpublished` | use `build_modelopt_nvfp4_transformer.py`; validated builder keeps selected FLUX.1 modules in BF16 and sets `swap_weight_nibbles=false` |
 | `black-forest-labs/FLUX.2-dev` | packed-QKV load path | `black-forest-labs/FLUX.2-dev-NVFP4` | validated packed export detection and runtime layout handling |
 
 ## ModelOpt FP8
@@ -103,7 +103,7 @@ sglang generate \
   ModelOpt FP8 checkpoints because the runtime expects the transformed FP8
   weights to remain GPU-resident in their column-major layout.
 - To build the converted checkpoint yourself from a ModelOpt diffusers export,
-  use `python -m sglang.multimodal_gen.tools.convert_modelopt_fp8_checkpoint`.
+  use `python -m sglang.multimodal_gen.tools.build_modelopt_fp8_transformer`.
 
 ## NVFP4
 
