@@ -162,6 +162,10 @@ class LayerwiseOffloadManager:
                 current_offset = 0
                 aligned_offsets: Dict[str, int] = {}
                 for name, weight in contiguous_weights:
+                    # Some fused diffusion kernels require tensor base pointers to
+                    # satisfy a 32-byte alignment contract. Reusing one flat buffer
+                    # is still fine, but each logical tensor slice must start on an
+                    # aligned offset inside that buffer.
                     current_offset = self._align_numel_offset(current_offset, dtype)
                     aligned_offsets[name] = current_offset
                     current_offset += weight.numel()
@@ -250,6 +254,10 @@ class LayerwiseOffloadManager:
             for name, meta in self._weight_metadata[layer_idx].items():
                 target = self.get_target_with_name(name)
                 if meta.get("preserve_strides", False):
+                    # Recreate the original view layout instead of flatten+view.
+                    # ModelOpt FP8 relies on a transposed runtime weight layout,
+                    # so preserving stride is part of correctness, not just an
+                    # optimization detail.
                     cpu_tensor = self._strided_cpu_weights[layer_idx][name]
                     gpu_tensor = torch.empty_strided(
                         size=meta["shape"],
@@ -436,6 +444,10 @@ class LayerwiseOffloadManager:
         for layer_idx in sorted(self._weight_metadata):
             for name, meta in self._weight_metadata[layer_idx].items():
                 if meta.get("preserve_strides", False):
+                    # Some quantized weights rely on a non-contiguous layout.
+                    # Yield the strided tensor directly instead of rebuilding it
+                    # from the flat buffer, which would silently lose the
+                    # original stride information.
                     yield name, self._strided_cpu_weights[layer_idx][name]
                     continue
 
