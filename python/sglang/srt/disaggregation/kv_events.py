@@ -56,9 +56,11 @@ class KVCacheEvent(
     """Base class for all KV cache-related events"""
 
 
-# Medium values for hicache storage tiers
-MEDIUM_GPU = "GPU"
-MEDIUM_CPU = "CPU_PINNED"
+# Storage tier identifiers for KV cache events.
+MEDIUM_GPU = "GPU"            # L1: device HBM
+MEDIUM_CPU = "CPU_PINNED"     # L2: host pinned memory
+MEDIUM_DISK = "DISK"          # L3: SSD / NVMe
+MEDIUM_EXTERNAL = "EXTERNAL"  # L4: shared / remote pool (e.g. Mooncake)
 
 
 class OffloadedState:
