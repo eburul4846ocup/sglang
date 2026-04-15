@@ -5,7 +5,15 @@ from typing import Callable, List
 import torch
 import torch.nn.functional as F
 
-from sglang.srt.layers.dp_attention import get_attention_cp_group
+from sglang.srt.distributed.device_communicators.pynccl_allocator import (
+    use_symmetric_memory,
+)
+from sglang.srt.layers.dp_attention import (
+    attn_cp_all_gather_into_tensor,
+    get_attention_cp_group,
+    get_attention_cp_size,
+    is_allocation_symmetric,
+)
 from sglang.srt.server_args import get_global_server_args
 
 
@@ -60,6 +68,18 @@ def can_cp_split(seq_len: int, cp_size: int, forward_batch):
 
 
 def cp_split_and_rebuild_data(forward_batch, input_: torch.Tensor):
+    from sglang.srt.layers.attention.nsa.utils import (
+        is_nsa_prefill_cp_round_robin_split,
+        nsa_cp_round_robin_split_data,
+    )
+
+    if is_nsa_prefill_cp_round_robin_split():
+        cp_size = get_attention_cp_size()
+        assert (
+            input_.shape[0] % cp_size == 0
+        ), f"Expect input shape 0 can divided by cp size, but got input shape {input_.shape}, cp size {cp_size}"
+        return nsa_cp_round_robin_split_data(input_)
+
     input_list = list(
         torch.split(input_, forward_batch.attn_cp_metadata.split_list, dim=0)
     )
@@ -70,6 +90,19 @@ def cp_split_and_rebuild_data(forward_batch, input_: torch.Tensor):
 
 
 def cp_split_and_rebuild_position(forward_batch, positions: torch.Tensor):
+    from sglang.srt.layers.attention.nsa.utils import (
+        is_nsa_prefill_cp_round_robin_split,
+        nsa_cp_round_robin_split_data,
+    )
+
+    if is_nsa_prefill_cp_round_robin_split():
+        cp_size = get_attention_cp_size()
+        assert positions.shape[0] % cp_size == 0, (
+            f"Expect positions shape 0 can divided by cp size, but got positions shape {positions.shape}, "
+            f"cp size {cp_size}"
+        )
+        return nsa_cp_round_robin_split_data(positions)
+
     position_id_list = list(
         torch.split(positions, forward_batch.attn_cp_metadata.split_list, dim=-1)
     )
@@ -95,12 +128,15 @@ def cp_all_gather_reorganized_into_tensor(
         input_tensor = F.pad(
             input_tensor, (0, 0, 0, pad_size), mode="constant", value=0
         )
-    input_tensor_full = torch.empty(
-        max_len * cp_size,
-        input_tensor.shape[1],
-        device=input_tensor.device,
-        dtype=input_tensor.dtype,
-    )
+    with use_symmetric_memory(
+        get_attention_cp_group(), disabled=not is_allocation_symmetric()
+    ):
+        input_tensor_full = torch.empty(
+            max_len * cp_size,
+            input_tensor.shape[1],
+            device=input_tensor.device,
+            dtype=input_tensor.dtype,
+        )
 
     get_attention_cp_group().cp_all_gather_into_tensor_async(
         input_tensor_full, input_tensor, stream
@@ -185,7 +221,40 @@ def cp_all_gather_rerange_output(input_tensor, cp_size, forward_batch, stream):
     |   +--------------result-------------------+
     | block0 | block1 | block2 | block3 | block4 | block5 | block6 | block7 |
     |   +-------------------------+
+
+    # for round-robin-split
+    |   +-----------before allgather------------+|
+    | dp_atten_tp0: token0, token4, token8, token12, token16, ... |
+    | dp_atten_tp1: token1, token5, token9, token13, token17, ... |
+    | dp_atten_tp2: token2, token6, token10, token14, token18, ... |
+    | dp_atten_tp3: token3, token7, token11, token15, token19, ... |
+    |
+    |   +--------------result-------------------+
+    | token0, token1, token2, token3, token4, token5, token6, token7, ...
+    |   +-------------------------+
     """
+    from sglang.srt.layers.attention.nsa.utils import (
+        is_nsa_prefill_cp_round_robin_split,
+    )
+
+    if is_nsa_prefill_cp_round_robin_split():
+        with use_symmetric_memory(
+            get_attention_cp_group(), disabled=not is_allocation_symmetric()
+        ):
+            output_tensor = input_tensor.new_empty(
+                (input_tensor.shape[0] * cp_size, *input_tensor.shape[1:]),
+            )
+        attn_cp_all_gather_into_tensor(
+            output_tensor,
+            input_tensor,
+        )
+        out_shape = output_tensor.shape
+        output_tensor = (
+            output_tensor.view(cp_size, -1, *out_shape[1:])
+            .transpose(0, 1)
+            .reshape(out_shape)
+        )
+        return output_tensor
 
     # TODO: Do we need to remove the padding here?
     bs_seq_len, hidden_size = input_tensor.shape
