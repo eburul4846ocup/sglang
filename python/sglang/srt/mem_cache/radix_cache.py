@@ -829,9 +829,14 @@ class RadixCache(BasePrefixCache):
                 stack.append(child)
         return total_size
 
-    def _record_store_event(self, node: TreeNode):
+    def _record_store_event(self, node: TreeNode, medium=None):
         # One BlockStored per ``page_size`` chunk.
+        # ``medium`` defaults to MEDIUM_GPU (device) but callers may override
+        # for lower-tier insertions (e.g. MEDIUM_CPU for host/L2 cache).
         if self.enable_kv_cache_events:
+            if medium is None:
+                medium = MEDIUM_GPU
+
             # Compute hash_value lazily if not already set
             if node.hash_value is None:
                 node.hash_value = compute_node_hash_values(node, self.page_size)
@@ -860,7 +865,7 @@ class RadixCache(BasePrefixCache):
                         token_ids=page_tokens,
                         block_size=len(page_tokens),
                         lora_id=None,
-                        medium=MEDIUM_GPU,
+                        medium=medium,
                     )
                 )
 
