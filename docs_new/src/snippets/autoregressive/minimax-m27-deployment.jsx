@@ -1,44 +1,39 @@
-export const KimiK25Deployment = () => {
-  // Config mirrors sgl-cookbook src/components/autoregressive/KimiK25ConfigGenerator/index.js.
-  //
-  // GPU requirements:
-  //   H200: tp=8
-  //   B300: tp=8
-  //   MI300X: tp=4 (64 heads / 4 = 16 heads per GPU, AITER MLA requires heads_per_gpu % 16 == 0)
-  //   MI325X: tp=4 (same constraint as MI300X)
-  //   MI350X: tp=4 (same constraint as MI300X)
-  //   MI355X: tp=4 (same constraint as MI300X)
-  //
-  // NVFP4 quantization is only supported on NVIDIA Blackwell (B300).
-  // Speculative decoding is only supported on H200 and B300.
+export const MiniMaxM27Deployment = () => {
+  // Config options. `getDynamicItems(values)` is evaluated at render time so that
+  // e.g. the 2-GPU option is only enabled on AMD or GB300 hardware.
   const options = {
     hardware: {
       name: 'hardware',
       title: 'Hardware Platform',
       items: [
         { id: 'h200',   label: 'H200',   default: true  },
-        { id: 'b300',   label: 'B300',   default: false },
+        { id: 'b200',   label: 'B200',   default: false },
+        { id: 'gb300',  label: 'GB300',  default: false },
+        { id: 'a100',   label: 'A100',   default: false },
+        { id: 'h100',   label: 'H100',   default: false },
         { id: 'mi300x', label: 'MI300X', default: false },
         { id: 'mi325x', label: 'MI325X', default: false },
-        { id: 'mi350x', label: 'MI350X', default: false },
         { id: 'mi355x', label: 'MI355X', default: false }
       ]
     },
-    quantization: {
-      name: 'quantization',
-      title: 'Quantization',
+    gpuCount: {
+      name: 'gpuCount',
+      title: 'GPU Count',
       getDynamicItems: (values) => {
         const hw = values.hardware;
-        const isB300 = hw === 'b300';
+        const isAMD = hw === 'mi300x' || hw === 'mi325x' || hw === 'mi355x';
+        const isGB300 = hw === 'gb300';
+        const canUse2GPU = isAMD || isGB300;
         return [
-          { id: 'int4',  label: 'INT4',  subtitle: 'initial model',   default: true },
-          { id: 'nvfp4', label: 'NVFP4', subtitle: 'Blackwell only',  default: false, disabled: !isB300, disabledReason: 'NVFP4 only on B300' }
+          { id: '2gpu', label: '2', default: canUse2GPU,  disabled: !canUse2GPU },
+          { id: '4gpu', label: '4', default: !canUse2GPU, disabled: false },
+          { id: '8gpu', label: '8', default: false,       disabled: isGB300 }
         ];
       }
     },
-    reasoning: {
-      name: 'reasoning',
-      title: 'Reasoning Parser',
+    thinking: {
+      name: 'thinking',
+      title: 'Thinking Capabilities',
       items: [
         { id: 'disabled', label: 'Disabled', default: false },
         { id: 'enabled',  label: 'Enabled',  default: true  }
@@ -51,46 +46,24 @@ export const KimiK25Deployment = () => {
         { id: 'disabled', label: 'Disabled', default: false },
         { id: 'enabled',  label: 'Enabled',  default: true  }
       ]
-    },
-    dpattention: {
-      name: 'dpattention',
-      title: 'DP Attention',
-      items: [
-        { id: 'disabled', label: 'Disabled', subtitle: 'Low Latency',     default: true  },
-        { id: 'enabled',  label: 'Enabled',  subtitle: 'High Throughput', default: false }
-      ]
-    },
-    speculative: {
-      name: 'speculative',
-      title: 'Speculative Decoding',
-      condition: (values) => values.hardware === 'h200' || values.hardware === 'b300',
-      items: [
-        { id: 'disabled', label: 'Disabled', default: true  },
-        { id: 'enabled',  label: 'Enabled',  default: false }
-      ]
     }
   };
 
-  const modelConfigs = {
-    h200:   { tp: 8 },
-    b300:   { tp: 8 },
-    mi300x: { tp: 4 },
-    mi325x: { tp: 4 },
-    mi350x: { tp: 4 },
-    mi355x: { tp: 4 }
-  };
-
+  // Helper: resolve an option's items (static or dynamic) given current values
   const resolveItems = (option, values) => {
-    if (typeof option.getDynamicItems === 'function') return option.getDynamicItems(values);
+    if (typeof option.getDynamicItems === 'function') {
+      return option.getDynamicItems(values);
+    }
     return option.items;
   };
 
   const getInitialState = () => {
     const initialState = {};
+    // Resolve hardware first so gpuCount's dynamic items can see it
     for (const [key, option] of Object.entries(options)) {
       const items = resolveItems(option, initialState);
-      const def = items.find(i => i.default && !i.disabled) || items.find(i => !i.disabled) || items[0];
-      initialState[key] = def.id;
+      const defaultItem = items.find(i => i.default && !i.disabled) || items.find(i => !i.disabled) || items[0];
+      initialState[key] = defaultItem.id;
     }
     return initialState;
   };
@@ -112,7 +85,7 @@ export const KimiK25Deployment = () => {
     return () => observer.disconnect();
   }, []);
 
-  // When hardware changes, re-resolve quantization defaults (NVFP4 only on B300).
+  // When hardware changes, re-evaluate gpuCount so disabled/default shifts apply
   useEffect(() => {
     setValues(prev => {
       const next = { ...prev };
@@ -133,77 +106,44 @@ export const KimiK25Deployment = () => {
     setValues(prev => ({ ...prev, [optionName]: value }));
   };
 
-  // Generate command - mirrors sgl-cookbook's config.generateCommand(values) exactly.
+  // Generate command mirrors sgl-cookbook src/components/autoregressive/MiniMaxM27ConfigGenerator/index.js
   const generateCommand = () => {
-    const { hardware, quantization, speculative } = values;
-    const isAMD = hardware === 'mi300x' || hardware === 'mi325x' || hardware === 'mi350x' || hardware === 'mi355x';
+    const { hardware, gpuCount, thinking, toolcall } = values;
 
-    // NVFP4 is only supported on NVIDIA Blackwell (B300)
-    if (quantization === 'nvfp4' && hardware !== 'b300') {
-      return '# NVFP4 quantization is only supported on NVIDIA Blackwell GPUs (B300)';
+    const isAMD = hardware === 'mi300x' || hardware === 'mi325x' || hardware === 'mi355x';
+    const isGB300 = hardware === 'gb300';
+    const canUse2GPU = isAMD || isGB300;
+
+    if (gpuCount === '2gpu' && !canUse2GPU) {
+      return '# Please select compatible hardware\n# 2-GPU requires AMD MI300X/MI325X/MI355X or GB300';
     }
 
-    // Speculative decoding only supported on H200 and B300
-    if (speculative === 'enabled' && hardware !== 'h200' && hardware !== 'b300') {
-      return '# Speculative Decoding for Kimi-K2.5 is only supported on H200 and B300';
-    }
+    const modelName = 'MiniMaxAI/MiniMax-M2.7';
 
-    // Model path depends on quantization
-    const modelName = quantization === 'nvfp4'
-      ? 'nvidia/Kimi-K2.5-NVFP4'
-      : 'moonshotai/Kimi-K2.5';
-
-    const hwConfig = modelConfigs[hardware];
-    const tpValue = hwConfig.tp;
-
-    let cmd = '';
-
-    // AMD ROCm environment variables
-    if (isAMD) {
-      cmd += 'SGLANG_USE_AITER=1 SGLANG_ROCM_FUSED_DECODE_MLA=0 ';
-    }
-
-    // Speculative decoding env var
-    if (speculative === 'enabled') {
-      cmd += 'SGLANG_ENABLE_SPEC_V2=1 ';
-    }
-
-    // If we added any env vars above, break to a new line for readability
-    if (isAMD || speculative === 'enabled') {
-      cmd += '\\\n';
-    }
-
-    cmd += 'sglang serve \\\n';
+    let cmd = 'sglang serve \\\n';
     cmd += `  --model-path ${modelName}`;
-    cmd += ` \\\n  --tp ${tpValue}`;
+
+    if (gpuCount === '8gpu') {
+      cmd += ' \\\n  --tp 8';
+      cmd += ' \\\n  --ep 8';
+    } else if (gpuCount === '4gpu') {
+      cmd += ' \\\n  --tp 4';
+      if (isAMD) cmd += ' \\\n  --ep 4';
+    } else if (gpuCount === '2gpu') {
+      cmd += ' \\\n  --tp 2';
+      if (isAMD) cmd += ' \\\n  --ep 2';
+    }
+
+    if (toolcall === 'enabled') cmd += ' \\\n  --tool-call-parser minimax-m2';
+    if (thinking === 'enabled') cmd += ' \\\n  --reasoning-parser minimax-append-think';
+
     cmd += ' \\\n  --trust-remote-code';
+    cmd += ' \\\n  --mem-fraction-static 0.85';
 
-    // DP Attention: --dp matches --tp
-    if (values.dpattention === 'enabled') {
-      cmd += ` \\\n  --dp ${tpValue} \\\n  --enable-dp-attention`;
-    }
-
-    // Reasoning parser
-    if (values.reasoning === 'enabled') {
-      cmd += ' \\\n  --reasoning-parser kimi_k2';
-    }
-
-    // Tool call parser
-    if (values.toolcall === 'enabled') {
-      cmd += ' \\\n  --tool-call-parser kimi_k2';
-    }
-
-    // Speculative decoding (EAGLE3)
-    if (speculative === 'enabled') {
-      cmd += ' \\\n  --speculative-algorithm EAGLE3 \\\n  --speculative-num-steps 3 \\\n  --speculative-eagle-topk 1 \\\n  --speculative-num-draft-tokens 4 \\\n  --speculative-draft-model-path lightseekorg/kimi-k2.5-eagle3';
-    }
-
-    // AMD: FP8 KV cache for memory efficiency
     if (isAMD) {
       cmd += ' \\\n  --kv-cache-dtype fp8_e4m3';
+      cmd += ' \\\n  --attention-backend triton';
     }
-
-    cmd += ' \\\n  --host 0.0.0.0 \\\n  --port 30000';
 
     return cmd;
   };
@@ -222,7 +162,6 @@ export const KimiK25Deployment = () => {
   return (
     <div style={containerStyle} className="not-prose">
       {Object.entries(options).map(([key, option]) => {
-        if (typeof option.condition === 'function' && !option.condition(values)) return null;
         const items = resolveItems(option, values);
         return (
           <div key={key} style={cardStyle}>

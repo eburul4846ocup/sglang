@@ -21,7 +21,16 @@ Qwen3.5 features a Gated Delta Networks combined with sparse Mixture-of-Experts 
 
 **Available Models:**
 
-- **BF16 (Full precision)**: [Qwen/Qwen3.5-397B-A17B](https://huggingface.co/Qwen/Qwen3.5-397B-A17B)
+| Model | BF16 (Full precision) | FP8 (8-bit Quantized) | FP4 (4-bit Quantized) |
+|-------|------|-----|-----|
+| Qwen3.5-397B-A17B | [Qwen/Qwen3.5-397B-A17B](https://huggingface.co/Qwen/Qwen3.5-397B-A17B) | [Qwen/Qwen3.5-397B-A17B-FP8](https://huggingface.co/Qwen/Qwen3.5-397B-A17B-FP8) | [nvidia/Qwen3.5-397B-A17B-NVFP4](https://huggingface.co/nvidia/Qwen3.5-397B-A17B-NVFP4) |
+| Qwen3.5-122B-A10B | [Qwen/Qwen3.5-122B-A10B](https://huggingface.co/Qwen/Qwen3.5-122B-A10B) | [Qwen/Qwen3.5-122B-A10B-FP8](https://huggingface.co/Qwen/Qwen3.5-122B-A10B-FP8) | - |
+| Qwen3.5-35B-A3B | [Qwen/Qwen3.5-35B-A3B](https://huggingface.co/Qwen/Qwen3.5-35B-A3B) | [Qwen/Qwen3.5-35B-A3B-FP8](https://huggingface.co/Qwen/Qwen3.5-35B-A3B-FP8) | - |
+| Qwen3.5-27B | [Qwen/Qwen3.5-27B](https://huggingface.co/Qwen/Qwen3.5-27B) | [Qwen/Qwen3.5-27B-FP8](https://huggingface.co/Qwen/Qwen3.5-27B-FP8) | - |
+| Qwen3.5-9B | [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | - | - |
+| Qwen3.5-4B | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | - | - |
+| Qwen3.5-2B | [Qwen/Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B) | - | - |
+| Qwen3.5-0.8B | [Qwen/Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B) | - | - |
 
 **License:** Apache 2.0
 
@@ -29,12 +38,18 @@ Qwen3.5 features a Gated Delta Networks combined with sparse Mixture-of-Experts 
 
 SGLang from the main branch is required for Qwen3.5. You can install from source or use a Docker image:
 
-```bash Command
+```bash
 # Install from source
 uv pip install 'git+https://github.com/sgl-project/sglang.git#subdirectory=python'
 
-# Or use Docker
+# Or use Docker (NVIDIA GPUs)
 docker pull lmsysorg/sglang:nightly-dev-20260216-d3bae71e
+
+# Or use Docker (AMD MI300X/MI325X)
+docker pull lmsysorg/sglang:v0.5.9-rocm720-mi30x
+
+# Or use Docker (AMD MI355X)
+docker pull lmsysorg/sglang:v0.5.9-rocm720-mi35x
 ```
 
 For the full Docker setup and other installation methods, please refer to the [official SGLang installation guide](../../../docs/get-started/installation).
@@ -51,51 +66,61 @@ This section provides deployment configurations optimized for different hardware
 
 ### 3.2 Configuration Tips
 
-- The model has ~397B parameters in BF16, requiring ~800GB of GPU memory for weights alone.
-- **H100 (80GB)** requires tp=16 (2 nodes) since each rank needs ~100GB at tp=8.
-- **H200 (141GB)** and **B200 (192GB)** can run with tp=8 on a single node.
 - Speculative decoding (MTP) can significantly reduce latency for interactive use cases.
+- **Mamba Radix Cache**: Qwen3.5's hybrid Gated Delta Networks architecture supports two mamba scheduling strategies via `--mamba-scheduler-strategy`:
+  - **V1 (`no_buffer`)**: Default. No overlap scheduler, lower memory usage. Required for AMD MI GPUs.
+  - **V2 (`extra_buffer`)**: Enables overlap scheduling and branching point caching with `--mamba-scheduler-strategy extra_buffer --page-size 64`. Requires FLA kernel backend (NVIDIA GPUs only). Trades higher mamba state memory for better throughput. Strictly superior in non-KV-cache-bound scenarios; in KV-cache-bound cases, weigh the overlap scheduling benefit against reduced max concurrency. `--page-size` must satisfy `FLA_CHUNK_SIZE % page_size == 0` or `page_size % FLA_CHUNK_SIZE == 0` (`FLA_CHUNK_SIZE` is currently 64).
 - The `--mem-fraction-static` flag is recommended for optimal memory utilization, adjust it based on your hardware and workload.
 - Context length defaults to 262,144 tokens. If you encounter OOM errors, consider reducing it, but maintain at least 128K to preserve thinking capabilities.
 - To speed up weight loading for this large model, add `--model-loader-extra-config='{"enable_multithread_load": "true","num_threads": 64}'` to the launch command.
 - **CUDA IPC Transport**: Add `SGLANG_USE_CUDA_IPC_TRANSPORT=1` as an environment variable to use CUDA IPC for transferring multimodal features, significantly improving TTFT (Time To First Token). Note: this consumes additional memory proportional to image size, so you may need to lower `--mem-fraction-static` or `--max-running-requests`.
-- **Multimodal Attention Backend**: Use `--mm-attention-backend fa3` on H100/H200 for better vision performance, or `--mm-attention-backend fa4` on B200.
+- **Multimodal Attention Backend**: Use `--mm-attention-backend fa3` on H100/H200 for better vision performance, or `--mm-attention-backend fa4` on B200/B300.
+- **B200 (FP8)**: Add `--enable-flashinfer-allreduce-fusion` for optimized throughput on Blackwell.
 - For processing large images or videos, you may need to lower `--mem-fraction-static` to leave room for image feature tensors.
+- Hardware requirements:
+    - **BF16**: ~397B parameters require ~800GB of GPU memory for weights.
+        - **H100 (80GB)** requires tp=16 (2 nodes) since each rank needs ~100GB at tp=8.
+        - **H200 (141GB)** runs with tp=8.
+        - **B200 (183GB)** runs with tp=8.
+        - **B300 (275GB)** runs with tp=4.
+        - **MI300X (192GB)** runs with tp=8.
+        - **MI325X (256GB)** runs with tp=4.
+        - **MI355X (288GB)** runs with tp=4.
+    - **FP8**: The FP8 quantized model requires ~400GB for weights, cutting memory in half.
+        - **H100 (80GB)** runs with tp=8.
+        - **H200 (141GB)** runs with tp=4.
+        - **B200 (183GB)** runs with tp=4.
+        - **B300 (275GB)** runs with tp=2.
+        - **MI300X (192GB)** runs with tp=4.
+        - **MI325X (256GB)** runs with tp=2.
+        - **MI355X (288GB)** runs with tp=2.
+    - **FP4**: The FP4 quantized model requires ~250GB for weights, cutting memory by almost 4x. Only compatible with B200/B300 (Blackwell architecture).
+        - **B200 (183GB)** runs with tp=4.
+        - **B300 (275GB)** runs with tp=2.
 
-<table style={{width: "100%", borderCollapse: "collapse", tableLayout: "fixed"}}>
-  <colgroup>
-    <col style={{width: "50%"}} />
-    <col style={{width: "50%"}} />
-  </colgroup>
-  <thead>
-    <tr style={{borderBottom: "2px solid #d55816"}}>
-      <th style={{textAlign: "left", padding: "10px 12px", fontWeight: 700, whiteSpace: "nowrap", backgroundColor: "rgba(255,255,255,0.02)"}}>Hardware</th>
-      <th style={{textAlign: "left", padding: "10px 12px", fontWeight: 700, whiteSpace: "nowrap", backgroundColor: "rgba(255,255,255,0.05)"}}>TP</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}>H100</td>
-      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>16</td>
-    </tr>
-    <tr>
-      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}>H200</td>
-      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>8</td>
-    </tr>
-    <tr>
-      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}>B200</td>
-      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>8</td>
-    </tr>
-  </tbody>
-</table>
+| Hardware | Memory | BF16 TP | FP8 TP | FP4 TP |
+| -------- | ------ | ------- | ------ | --------------- |
+| H100     | 80GB   | 16      | 8      | N/A             |
+| H200     | 141GB  | 8       | 4      | N/A             |
+| B200     | 183GB  | 8       | 4      | 4               |
+| B300     | 275GB  | 4       | 2      | 2               |
+| MI300X   | 192GB  | 8       | 4      | N/A             |
+| MI325X   | 256GB  | 4       | 2      | N/A             |
+| MI355X   | 288GB  | 4       | 2      | N/A             |
+
+:::caution FP8 KV Cache
+`--kv-cache-dtype fp8_e4m3` quantizes the KV cache to FP8 at runtime. Since these FP8 model checkpoints do not include pre-calibrated KV cache scaling factors, SGLang defaults to a scale of 1.0, which may cause noticeable accuracy degradation on reasoning-heavy tasks. It is not included in the generated commands above; add it manually only if memory constraints require the trade-off.
+:::
 
 ## 4. Model Invocation
 
+**NVIDIA:**
+
 Deploy Qwen3.5-397B-A17B with the following command (H200, all features enabled):
 
-```shell Command
-python -m sglang.launch_server \
-  --model Qwen/Qwen3.5-397B-A17B \
+```shell
+sglang serve \
+  --model-path Qwen/Qwen3.5-397B-A17B \
   --tp 8 \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
@@ -108,6 +133,23 @@ python -m sglang.launch_server \
   --port 30000
 ```
 
+**AMD:**
+
+Deploy Qwen3.5-397B-A17B with the following command (MI300X/MI325X/MI355X):
+
+```shell
+sglang serve \
+  --model-path Qwen/Qwen3.5-397B-A17B \
+  --tp 8 \
+  --reasoning-parser qwen3 \
+  --tool-call-parser qwen3_coder \
+  --mem-fraction-static 0.8 \
+  --attention-backend triton \
+  --host 0.0.0.0 \
+  --port 30000
+```
+> **Note:** TP8 works on all MI GPUs. For MI325X/MI355X, you can use --tp 4 as the minimum requirement.
+
 ### 4.1 Basic Usage
 
 For basic API usage and request examples, please refer to:
@@ -118,7 +160,7 @@ For basic API usage and request examples, please refer to:
 
 Qwen3.5 supports image and video inputs as a unified vision-language model. Here is an example with an image:
 
-```python Example
+```python
 from openai import OpenAI
 
 client = OpenAI(
@@ -175,7 +217,7 @@ print()
 
 **Output Example:**
 
-```text Output
+```
 =============== Thinking =================
 The user wants a detailed description of the provided image.
 
@@ -265,7 +307,7 @@ To disable thinking and use Instruct mode, pass `chat_template_kwargs` at reques
 
 Thinking mode is enabled by default. The model will reason step-by-step before answering, and the thinking process is returned via `reasoning_content`:
 
-```python Example
+```python
 from openai import OpenAI
 
 client = OpenAI(
@@ -313,7 +355,7 @@ print()
 
 **Output Example:**
 
-```text Output
+```
 =============== Thinking =================
 Thinking Process:
 
@@ -442,7 +484,7 @@ $$3600 \rightarrow 36.00$$
 
 To disable thinking and get a direct response, pass `{"enable_thinking": false}` via `chat_template_kwargs`:
 
-```python Example
+```python
 from openai import OpenAI
 
 client = OpenAI(
@@ -473,7 +515,7 @@ print()
 
 **Output Example:**
 
-```text Output
+```
 To find 15% of 240, you can follow these steps:
 
 ### Step-by-Step Deduction
@@ -505,7 +547,7 @@ Qwen3.5 supports tool calling capabilities. Enable the tool call parser during d
 
 **Python Example (with Thinking Process):**
 
-```python Example
+```python
 from openai import OpenAI
 
 client = OpenAI(
@@ -586,7 +628,7 @@ print()
 
 **Output Example:**
 
-```text Output
+```
 =============== Thinking =================
 The user is asking about the weather in Beijing. I have access to a get_weather function that can provide current weather information for a location. Let me check the parameters:
 
@@ -614,14 +656,12 @@ Tool Call: None
 #### 5.1.1 GSM8K Benchmark
 
 - Benchmark Command
-
-```bash Command
+```bash
 python3 benchmark/gsm8k/bench_sglang.py --port 30000
 ```
 
 - Test Result
-
-```text Output
+```
 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████| 200/200 [00:31<00:00,  6.43it/s]
 Accuracy: 0.975
 Invalid: 0.005
@@ -632,14 +672,12 @@ Output throughput: 998.166 token/s
 #### 5.1.2 MMMU Benchmark
 
 - Benchmark Command
-
-```bash Command
+```bash
 python3 benchmark/mmmu/bench_sglang.py --concurrency 128 --port 30000 --max-new-tokens 512
 ```
 
 - Test Result
-
-```text Output
+```
 {'Accounting': {'acc': 1.0, 'num': 3},
  'Agriculture': {'acc': 1.0, 'num': 4},
  'Art': {'acc': 1.0, 'num': 9},
@@ -684,8 +722,7 @@ Overall accuracy: 0.978
 - SGLang Version: main branch
 
 Server Launch Command:
-
-```bash Command
+```bash
 SGLANG_USE_CUDA_IPC_TRANSPORT=1 python -m sglang.launch_server \
   --model Qwen/Qwen3.5-397B-A17B \
   --tp 8 \
@@ -702,7 +739,7 @@ SGLANG_USE_CUDA_IPC_TRANSPORT=1 python -m sglang.launch_server \
 
 #### 5.3.1 Latency Benchmark
 
-```bash Command
+```bash
 python3 -m sglang.bench_serving \
   --backend sglang \
   --model Qwen/Qwen3.5-397B-A17B \
@@ -714,7 +751,7 @@ python3 -m sglang.bench_serving \
   --request-rate inf
 ```
 
-```text Output
+```
 ============ Serving Benchmark Result ============
 Backend:                                 sglang
 Traffic request rate:                    inf
@@ -757,7 +794,7 @@ Max ITL (ms):                            58.03
 
 #### 5.3.2 Throughput Benchmark
 
-```bash Command
+```bash
 python3 -m sglang.bench_serving \
   --backend sglang \
   --model Qwen/Qwen3.5-397B-A17B \
@@ -769,7 +806,7 @@ python3 -m sglang.bench_serving \
   --request-rate inf
 ```
 
-```text Output
+```
 ============ Serving Benchmark Result ============
 Backend:                                 sglang
 Traffic request rate:                    inf
@@ -816,7 +853,7 @@ We use SGLang's built-in benchmarking tool to conduct performance evaluation wit
 
 #### 5.3.1 Latency Benchmark
 
-```bash Command
+```bash
 python3 -m sglang.bench_serving \
   --backend sglang-oai-chat \
   --host 127.0.0.1 \
@@ -832,13 +869,13 @@ python3 -m sglang.bench_serving \
   --request-rate inf
 ```
 
-```text Output
+```
 TODO
 ```
 
 #### 5.3.2 Throughput Benchmark
 
-```bash Command
+```bash
 python3 -m sglang.bench_serving \
   --backend sglang-oai-chat \
   --host 127.0.0.1 \
@@ -854,6 +891,6 @@ python3 -m sglang.bench_serving \
   --request-rate inf
 ```
 
-```text Output
+```
 TODO
 ```
