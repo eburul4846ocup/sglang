@@ -420,13 +420,7 @@ class LTX2DenoisingStage(DenoisingStage):
         *,
         is_ltx23_variant: bool,
     ) -> bool:
-        return bool(
-            is_ltx23_variant
-            and get_sp_world_size() > 1
-            and server_args.pipeline_config.can_shard_audio_latents_for_sp(
-                batch.audio_latents
-            )
-        )
+        return False
 
     def _get_condition_image_encoder(
         self,
