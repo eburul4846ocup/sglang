@@ -30,7 +30,6 @@ from sglang.srt.eplb.expert_distribution import get_global_expert_distribution_r
 from sglang.srt.layers.attention.nsa.utils import (
     can_nsa_cp_split,
     is_nsa_enable_prefill_cp,
-    is_nsa_prefill_cp_round_robin_split,
     nsa_use_prefill_cp,
 )
 from sglang.srt.layers.dp_attention import (
@@ -274,15 +273,12 @@ class DeepseekV3ForCausalLMNextN(DeepseekV3ForCausalLM):
             if can_nsa_cp_split(
                 len(input_ids), self.cp_size, self.use_nsa, forward_batch
             ):
-                if is_nsa_prefill_cp_round_robin_split():
-                    forward_batch.attn_cp_metadata = True
-                else:
-                    forward_batch.attn_cp_metadata = prepare_context_parallel_metadata(
-                        len(input_ids),
-                        self.cp_rank,
-                        self.cp_size,
-                        forward_batch.seq_lens_cpu.tolist(),
-                    )
+                forward_batch.attn_cp_metadata = prepare_context_parallel_metadata(
+                    len(input_ids),
+                    self.cp_rank,
+                    self.cp_size,
+                    forward_batch.seq_lens_cpu.tolist(),
+                )
         hidden_states = self.model(input_ids, positions, forward_batch)
         return self.logits_processor(
             input_ids, hidden_states, self.lm_head, forward_batch

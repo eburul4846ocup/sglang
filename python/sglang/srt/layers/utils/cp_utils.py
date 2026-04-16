@@ -117,7 +117,11 @@ def cp_all_gather_reorganized_into_tensor(
     input_tensor, total_len, cp_size, forward_batch, stream
 ):
     """
-    Allgather communication for context_parallel hidden_states.
+    Allgather communication for context_parallel(kv_cache, index_k, hidden_states).
+    This implementation mainly consists of three parts:
+    Step 1, padding the input shape to unify the shape for allgather communication (the shape must be the same).
+    Step 2, allgather communication(async).
+    Step 3, removing the padding and reassembling the data according to the actual tokens.
     """
     # The input tensor should already be padded to the same length for allgather communication.
     # No need to pad again.
@@ -390,6 +394,13 @@ def prepare_context_parallel_metadata(
     cp_size,
     seqs_len,
 ):
+    from sglang.srt.layers.attention.nsa.utils import (
+        is_nsa_prefill_cp_round_robin_split,
+    )
+
+    if is_nsa_prefill_cp_round_robin_split():
+        return ContextParallelMetadata()
+
     """prepare_input_dp_with_cp_dsa-zigzag index
     Example (DP_ATTENT_TP == CP_SIZE == 4):
     Description:

@@ -57,7 +57,6 @@ from sglang.srt.layers.attention.nsa.nsa_indexer import Indexer
 from sglang.srt.layers.attention.nsa.utils import (
     can_nsa_cp_split,
     is_nsa_enable_prefill_cp,
-    is_nsa_prefill_cp_round_robin_split,
     nsa_use_prefill_cp,
 )
 from sglang.srt.layers.communicator import (
@@ -2294,15 +2293,12 @@ class DeepseekV2ForCausalLM(nn.Module, DeepseekV2WeightLoaderMixin):
             if can_nsa_cp_split(
                 len(input_ids), self.cp_size, self.use_nsa, forward_batch
             ):
-                if is_nsa_prefill_cp_round_robin_split():
-                    forward_batch.attn_cp_metadata = True
-                else:
-                    forward_batch.attn_cp_metadata = prepare_context_parallel_metadata(
-                        len(input_ids),
-                        self.cp_rank,
-                        self.cp_size,
-                        forward_batch.seq_lens_cpu.tolist(),
-                    )
+                forward_batch.attn_cp_metadata = prepare_context_parallel_metadata(
+                    len(input_ids),
+                    self.cp_rank,
+                    self.cp_size,
+                    forward_batch.seq_lens_cpu.tolist(),
+                )
 
         with get_attn_tp_context().maybe_input_scattered(forward_batch):
             hidden_states = self.model(
