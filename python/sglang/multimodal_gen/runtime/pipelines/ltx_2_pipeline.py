@@ -378,6 +378,9 @@ class LTX2TwoStagePipeline(_BaseLTX2Pipeline):
                     LTX2LoRASwitchStage(pipeline=self, phase="stage2"),
                     "ltx2_lora_switch_stage2",
                 ),
+                LTX2ImageEncodingStage(
+                    vae=self.get_module("vae"),
+                ),
                 LTX2RefinementStage(
                     transformer=self.get_module("transformer"),
                     scheduler=self.get_module("scheduler"),

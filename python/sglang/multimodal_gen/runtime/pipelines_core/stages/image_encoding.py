@@ -427,7 +427,17 @@ class LTX2ImageEncodingStage(PipelineStage):
             batch.image_latent is not None
             and int(getattr(batch, "ltx2_num_image_tokens", 0)) > 0
         ):
-            return batch
+            # Re-encode if resolution changed (e.g. two-stage upsample between stages)
+            vae_sf = int(server_args.pipeline_config.vae_scale_factor)
+            patch = int(server_args.pipeline_config.patch_size)
+            expected = (int(batch.height) // vae_sf // patch) * (
+                int(batch.width) // vae_sf // patch
+            )
+            if int(batch.image_latent.shape[1]) == expected:
+                return batch
+            # Resolution mismatch — clear and re-encode below
+            batch.image_latent = None
+            batch.ltx2_num_image_tokens = 0
 
         batch.ltx2_num_image_tokens = 0
         batch.image_latent = None
