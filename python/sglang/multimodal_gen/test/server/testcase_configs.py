@@ -269,6 +269,16 @@ class DiffusionSamplingParams:
 
 
 @dataclass(frozen=True)
+class Bf16QualityThresholds:
+    """Loose output-similarity thresholds for BF16-vs-quantized CI checks."""
+
+    clip_threshold: float
+    ssim_threshold: float
+    psnr_threshold: float
+    mean_abs_diff_threshold: float
+
+
+@dataclass(frozen=True)
 class DiffusionTestCase:
     """Configuration for a single model/scenario test case."""
 
@@ -283,6 +293,8 @@ class DiffusionTestCase:
     run_lora_dynamic_load_check: bool = False
     run_lora_dynamic_switch_check: bool = False
     run_multi_lora_api_check: bool = False
+    run_bf16_quality_check: bool = False
+    bf16_quality_thresholds: Bf16QualityThresholds | None = None
 
     def __post_init__(self) -> None:
         has_startup_lora = self.server_args.lora_path is not None
@@ -384,7 +396,7 @@ T2I_sampling_params = DiffusionSamplingParams(
 MODELOPT_T2I_CI_sampling_params = DiffusionSamplingParams(
     prompt="Doraemon is eating dorayaki",
     output_size="768x768",
-    extras={"num_inference_steps": 12},
+    extras={"num_inference_steps": 12, "seed": 0},
 )
 
 TI2I_sampling_params = DiffusionSamplingParams(
@@ -427,7 +439,7 @@ MODELOPT_T2V_CI_sampling_params = DiffusionSamplingParams(
     prompt=T2V_PROMPT,
     output_size="640x384",
     num_frames=17,
-    extras={"num_inference_steps": 12},
+    extras={"num_inference_steps": 12, "seed": 0},
 )
 
 TI2V_sampling_params = DiffusionSamplingParams(
@@ -772,11 +784,26 @@ MODELOPT_FLUX1_FP8_TRANSFORMER = "BBuf/flux1-dev-modelopt-fp8-sglang-transformer
 MODELOPT_FLUX2_FP8_TRANSFORMER = "BBuf/flux2-dev-modelopt-fp8-sglang-transformer"
 MODELOPT_WAN22_FP8_TRANSFORMER = "BBuf/wan22-t2v-a14b-modelopt-fp8-sglang-transformer"
 MODELOPT_FLUX1_NVFP4_TRANSFORMER = "BBuf/flux1-dev-modelopt-nvfp4-sglang-transformer"
-MODELOPT_FLUX2_NVFP4_MODEL = "black-forest-labs/FLUX.2-dev-NVFP4"
+MODELOPT_FLUX2_NVFP4_TRANSFORMER = "black-forest-labs/FLUX.2-dev-NVFP4"
 MODELOPT_WAN22_NVFP4_TRANSFORMER = (
     "BBuf/wan22-t2v-a14b-modelopt-nvfp4-sglang-transformer"
 )
 MODELOPT_NVFP4_B200_ENV_VARS = {"SGLANG_DIFFUSION_FLASHINFER_FP4_GEMM_BACKEND": "cudnn"}
+# Intentionally loose BF16-vs-quantized smoke thresholds. These catch blank,
+# corrupted, or semantically wrong media while leaving room for diffusion
+# trajectory drift; tighten them after collecting B200 artifact metrics.
+MODELOPT_IMAGE_BF16_QUALITY_THRESHOLDS = Bf16QualityThresholds(
+    clip_threshold=0.80,
+    ssim_threshold=0.20,
+    psnr_threshold=7.0,
+    mean_abs_diff_threshold=90.0,
+)
+MODELOPT_VIDEO_BF16_QUALITY_THRESHOLDS = Bf16QualityThresholds(
+    clip_threshold=0.75,
+    ssim_threshold=0.15,
+    psnr_threshold=6.0,
+    mean_abs_diff_threshold=100.0,
+)
 
 
 def _make_modelopt_ci_case(
@@ -787,6 +814,7 @@ def _make_modelopt_ci_case(
     sampling_params: DiffusionSamplingParams,
     extras: list[str],
     env_vars: dict[str, str] | None = None,
+    bf16_quality_thresholds: Bf16QualityThresholds,
 ) -> DiffusionTestCase:
     return DiffusionTestCase(
         case_id,
@@ -800,6 +828,8 @@ def _make_modelopt_ci_case(
         sampling_params,
         run_perf_check=False,
         run_consistency_check=False,
+        run_bf16_quality_check=True,
+        bf16_quality_thresholds=bf16_quality_thresholds,
     )
 
 
@@ -810,6 +840,7 @@ ONE_GPU_CASES_C = [
         modality="image",
         sampling_params=MODELOPT_T2I_CI_sampling_params,
         extras=["--transformer-path", MODELOPT_FLUX1_FP8_TRANSFORMER],
+        bf16_quality_thresholds=MODELOPT_IMAGE_BF16_QUALITY_THRESHOLDS,
     ),
     _make_modelopt_ci_case(
         "flux2_modelopt_fp8_t2i",
@@ -817,6 +848,7 @@ ONE_GPU_CASES_C = [
         modality="image",
         sampling_params=MODELOPT_T2I_CI_sampling_params,
         extras=["--transformer-path", MODELOPT_FLUX2_FP8_TRANSFORMER],
+        bf16_quality_thresholds=MODELOPT_IMAGE_BF16_QUALITY_THRESHOLDS,
     ),
     _make_modelopt_ci_case(
         "wan22_modelopt_fp8_t2v",
@@ -824,6 +856,7 @@ ONE_GPU_CASES_C = [
         modality="video",
         sampling_params=MODELOPT_T2V_CI_sampling_params,
         extras=["--transformer-path", MODELOPT_WAN22_FP8_TRANSFORMER],
+        bf16_quality_thresholds=MODELOPT_VIDEO_BF16_QUALITY_THRESHOLDS,
     ),
     _make_modelopt_ci_case(
         "flux1_modelopt_nvfp4_t2i",
@@ -832,14 +865,16 @@ ONE_GPU_CASES_C = [
         sampling_params=MODELOPT_T2I_CI_sampling_params,
         extras=["--transformer-path", MODELOPT_FLUX1_NVFP4_TRANSFORMER],
         env_vars=MODELOPT_NVFP4_B200_ENV_VARS,
+        bf16_quality_thresholds=MODELOPT_IMAGE_BF16_QUALITY_THRESHOLDS,
     ),
     _make_modelopt_ci_case(
         "flux2_modelopt_nvfp4_t2i",
-        model_path=MODELOPT_FLUX2_NVFP4_MODEL,
+        model_path=DEFAULT_FLUX_2_DEV_MODEL_NAME_FOR_TEST,
         modality="image",
         sampling_params=MODELOPT_T2I_CI_sampling_params,
-        extras=[],
+        extras=["--transformer-path", MODELOPT_FLUX2_NVFP4_TRANSFORMER],
         env_vars=MODELOPT_NVFP4_B200_ENV_VARS,
+        bf16_quality_thresholds=MODELOPT_IMAGE_BF16_QUALITY_THRESHOLDS,
     ),
     _make_modelopt_ci_case(
         "wan22_modelopt_nvfp4_t2v",
@@ -848,6 +883,7 @@ ONE_GPU_CASES_C = [
         sampling_params=MODELOPT_T2V_CI_sampling_params,
         extras=["--transformer-path", MODELOPT_WAN22_NVFP4_TRANSFORMER],
         env_vars=MODELOPT_NVFP4_B200_ENV_VARS,
+        bf16_quality_thresholds=MODELOPT_VIDEO_BF16_QUALITY_THRESHOLDS,
     ),
 ]
 
