@@ -271,12 +271,13 @@ class LTX2Pipeline(_BaseLTX2Pipeline):
 
 class LTX2TwoStageDeviceManager:
     """
-        LTX2TwoStageDeviceManager provides three modes to manage dit weights for LTX2 two stage pipelines.
-        The three modes are:
-        - `resident`: keep both transformers on GPU and only update phase state. The most performant one, but requires the most VRAM
-        - `snapshot`: release the previous DiT by rebinding to CPU snapshots, and lazily H2D the next DiT when needed
-        - `legacy`: caller falls back to classic LoRA hot-switch path. The slowest one, but requires no additional VRAM
+    LTX2TwoStageDeviceManager provides three modes to manage dit weights for LTX2 two stage pipelines.
+    The three modes are:
+    - `resident`: keep both transformers on GPU and only update phase state. The most performant one, but requires the most VRAM
+    - `snapshot`: release the previous DiT by rebinding to CPU snapshots, and lazily H2D the next DiT when needed
+    - `legacy`: caller falls back to classic LoRA hot-switch path. The slowest one, but requires no additional VRAM
     """
+
     VALID_MODES = ("legacy", "snapshot", "resident")
 
     def __init__(self, pipeline: "LTX2TwoStagePipeline", server_args: ServerArgs):
@@ -333,9 +334,7 @@ class LTX2TwoStageDeviceManager:
             refinement_stage.transformer = self.pipeline.get_module("transformer_2")
 
     def switch_phase(self, phase: str) -> bool:
-        """Switch active two-stage DiT with minimal transfer/sync overhead.
-
-        """
+        """Switch active two-stage DiT with minimal transfer/sync overhead."""
         if not self.should_use_premerged():
             return False
         if phase == self._active_phase:
