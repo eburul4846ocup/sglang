@@ -302,6 +302,8 @@ class LTX2DenoisingStage(DenoisingStage):
             batch.image_latent is None
             or int(getattr(batch, "ltx2_num_image_tokens", 0)) <= 0
         ):
+            logger.info("PROBE _should_apply_ltx2_ti2v: image_latent=%s tokens=%d",
+                         batch.image_latent is not None, int(getattr(batch, "ltx2_num_image_tokens", 0)))
             return False
         did_sp_shard = bool(getattr(batch, "did_sp_shard_latents", False))
         if not did_sp_shard:
