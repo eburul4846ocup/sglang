@@ -218,8 +218,13 @@ class LTX2RefinementStage(LTX2AVDenoisingStage):
                     device=batch.audio_latents.device, dtype=torch.float32
                 )
 
-        batch.image_latent = None
-        batch.ltx2_num_image_tokens = 0
+        # NOTE: do not clear batch.image_latent here. Previously this was cleared
+        # so that the subsequent _prepare_denoising_loop would re-encode the
+        # image at full resolution via _prepare_ltx2_image_latent. That inline
+        # encoding is now done by a dedicated LTX2ImageEncodingStage that runs
+        # *before* LTX2RefinementStage in the two-stage pipeline, so the
+        # full-resolution image_latent is already populated on batch and must
+        # persist through the denoising loop for TI2V conditioning.
 
         original_scheduler = self.scheduler
         original_batch_timesteps = batch.timesteps
