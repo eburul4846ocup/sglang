@@ -255,8 +255,9 @@ class LTX2ImageEncodingStage(PipelineStage):
         img_array: np.ndarray, crf: int = 33
     ) -> np.ndarray:
         """Encode as a single H.264 frame and decode back to simulate compression artifacts."""
-        import av
         from io import BytesIO
+
+        import av
 
         if crf == 0:
             return img_array
