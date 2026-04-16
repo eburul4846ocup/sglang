@@ -456,12 +456,22 @@ class LTX2ImageEncodingStage(PipelineStage):
             resample=PIL.Image.Resampling.BILINEAR,
         )
 
-        # 2. Load encoder(s) to device
+        # 2. Load encoder(s) to device, cast to encode_dtype
         use_condition_encoder = self._ensure_condition_image_encoder(server_args)
         self.load_model()
 
         device = get_local_torch_device()
         encode_dtype = batch.latents.dtype
+
+        # Cast the active encoder to the latent precision (must match original
+        # behavior — running in a different dtype shifts the encoded latents).
+        if use_condition_encoder:
+            self._condition_image_encoder = self._condition_image_encoder.to(
+                dtype=encode_dtype
+            )
+        else:
+            self.vae = self.vae.to(dtype=encode_dtype)
+
         video_condition = self._pil_to_video_tensor(
             conditioned_img,
             width=int(batch.width),
@@ -477,6 +487,13 @@ class LTX2ImageEncodingStage(PipelineStage):
             )
         else:
             latent = self._vae_encode(video_condition, server_args, batch.generator)
+
+        # Restore VAE to its config dtype (shared with decoding stage)
+        if not use_condition_encoder:
+            original_dtype = PRECISION_TO_TYPE[
+                server_args.pipeline_config.vae_precision
+            ]
+            self.vae = self.vae.to(dtype=original_dtype)
 
         # 4. Pack into token latents and validate
         packed = server_args.pipeline_config.maybe_pack_latents(
