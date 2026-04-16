@@ -112,10 +112,6 @@ def diffusion_server(case: DiffusionTestCase) -> ServerContext:
     if server_args.enable_warmup:
         extra_args += " --warmup"
 
-    # Derive scheduler/master ports from the dynamic HTTP port so they don't
-    # collide with other users on shared machines (default 5555/30005 are often taken).
-    extra_args += f" --scheduler-port {port + 500} --master-port {port + 501}"
-
     # Strict ports: fail immediately if port is occupied instead of silently
     # picking another one (which causes the test client to connect to the wrong server).
     extra_args += " --strict-ports"
