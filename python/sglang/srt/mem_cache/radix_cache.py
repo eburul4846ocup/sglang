@@ -35,10 +35,10 @@ import torch
 logger = logging.getLogger(__name__)
 
 from sglang.srt.disaggregation.kv_events import (
-    MEDIUM_GPU,
     AllBlocksCleared,
     BlockRemoved,
     BlockStored,
+    StorageMedium,
 )
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
@@ -831,11 +831,11 @@ class RadixCache(BasePrefixCache):
 
     def _record_store_event(self, node: TreeNode, medium=None):
         # One BlockStored per ``page_size`` chunk.
-        # ``medium`` defaults to MEDIUM_GPU (device) but callers may override
-        # for lower-tier insertions (e.g. MEDIUM_CPU for host/L2 cache).
+        # ``medium`` defaults to StorageMedium.GPU but callers may override
+        # for lower-tier insertions (e.g. StorageMedium.CPU for host/L2 cache).
         if self.enable_kv_cache_events:
             if medium is None:
-                medium = MEDIUM_GPU
+                medium = StorageMedium.GPU
 
             # Compute hash_value lazily if not already set
             if node.hash_value is None:
@@ -874,11 +874,11 @@ class RadixCache(BasePrefixCache):
 
     def _record_remove_event(self, node: TreeNode, medium=None):
         # One BlockRemoved per chunk.
-        # ``medium`` defaults to MEDIUM_GPU but callers may override for
-        # lower-tier removals (e.g. MEDIUM_CPU when evicting from host).
+        # ``medium`` defaults to StorageMedium.GPU but callers may override for
+        # lower-tier removals (e.g. StorageMedium.CPU when evicting from host).
         if self.enable_kv_cache_events:
             if medium is None:
-                medium = MEDIUM_GPU
+                medium = StorageMedium.GPU
 
             # Compute hash_value lazily if not already set (must match what was stored)
             if node.hash_value is None:
