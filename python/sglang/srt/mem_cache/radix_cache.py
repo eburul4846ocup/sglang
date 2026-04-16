@@ -872,9 +872,14 @@ class RadixCache(BasePrefixCache):
                 parent_block_hash = block_hash
                 page_index += 1
 
-    def _record_remove_event(self, node: TreeNode):
+    def _record_remove_event(self, node: TreeNode, medium=None):
         # One BlockRemoved per chunk.
+        # ``medium`` defaults to MEDIUM_GPU but callers may override for
+        # lower-tier removals (e.g. MEDIUM_CPU when evicting from host).
         if self.enable_kv_cache_events:
+            if medium is None:
+                medium = MEDIUM_GPU
+
             # Compute hash_value lazily if not already set (must match what was stored)
             if node.hash_value is None:
                 node.hash_value = compute_node_hash_values(node, self.page_size)
@@ -888,7 +893,7 @@ class RadixCache(BasePrefixCache):
                 block_hash = hash_str_to_int64(node.hash_value[page_index])
 
                 self.kv_event_queue.append(
-                    BlockRemoved(block_hashes=[block_hash], medium=MEDIUM_GPU)
+                    BlockRemoved(block_hashes=[block_hash], medium=medium)
                 )
 
                 page_index += 1
