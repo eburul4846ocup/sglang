@@ -532,6 +532,7 @@ def _get_runner_label(job: dict) -> str:
 
 
 _RUNNER_LABEL_RE = re.compile(r"linux-(mi\w+?)-(\d+)gpu")
+_RUNNER_LABEL_ALT_RE = re.compile(r"linux-(mi\w+?)-gpu-(\d+)")
 
 
 def _runner_label_sort_key(label: str) -> tuple:
@@ -544,7 +545,7 @@ def _runner_label_sort_key(label: str) -> tuple:
     m = _RUNNER_LABEL_RE.search(label)
     if m:
         return (m.group(1), int(m.group(2)), label)
-    m2 = re.search(r"linux-(mi\w+?)-gpu-(\d+)", label)
+    m2 = _RUNNER_LABEL_ALT_RE.search(label)
     if m2:
         return (m2.group(1), int(m2.group(2)), label)
     return ("zzz", 0, label)
@@ -807,10 +808,11 @@ def analyze_utilization_snapshots(
     jobs: list[dict],
     report_time: datetime = None,
     interval_minutes: int = 15,
+    hours: int = 24,
 ) -> dict[str, list[dict]]:
     """Point-in-time snapshot at regular intervals per runner label.
 
-    At each interval mark over the last 24 hours, counts:
+    At each interval mark over the last *hours* hours, counts:
     - running: jobs that have a runner assigned (``runner_name`` set)
               and are between ``started_at`` and ``completed_at``
     - queued:  jobs that have no runner assigned and haven't completed
@@ -856,7 +858,7 @@ def analyze_utilization_snapshots(
         sorted_running = sorted(running_events, key=lambda x: (x[0], x[1]))
         sorted_queued = sorted(queued_events, key=lambda x: (x[0], x[1]))
 
-        window_start = report_time - timedelta(hours=24)
+        window_start = report_time - timedelta(hours=hours)
         window_start = window_start.replace(
             minute=(window_start.minute // interval_minutes) * interval_minutes,
             second=0,
@@ -951,7 +953,13 @@ def process_results(
                 status_summary[job_name]["failure"] += 1
             elif conclusion == "skipped":
                 status_summary[job_name]["skipped"] += 1
-            elif conclusion in ("cancelled", "timed_out", "action_required"):
+            elif conclusion in (
+                "cancelled",
+                "timed_out",
+                "action_required",
+                "neutral",
+                "stale",
+            ):
                 status_summary[job_name]["cancelled"] += 1
         elif status in status_summary[job_name]:
             status_summary[job_name][status] += 1
@@ -1589,7 +1597,7 @@ def format_runner_report_markdown(
             lines.append("")
 
     # --- Runner Utilization Snapshots ---
-    util_snapshots = analyze_utilization_snapshots(jobs, report_time)
+    util_snapshots = analyze_utilization_snapshots(jobs, report_time, hours=hours)
     if util_snapshots:
         lines.append("## Runner Utilization (15-min snapshots)")
         lines.append("")
