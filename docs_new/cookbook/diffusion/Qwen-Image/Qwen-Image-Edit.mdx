@@ -4,6 +4,8 @@ metatags:
     description: "Deploy Qwen-Image-Edit-2511 with SGLang - 20B image editing model with text rendering, character consistency, and geometric reasoning."
 ---
 
+import { QwenImageEditDeployment } from '/src/snippets/diffusion/qwen-image-edit-deployment.jsx';
+
 ## 1. Model Introduction
 
 [Qwen-Image-Edit-2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) is an enhanced version over Qwen-Image-Edit-2509, featuring multiple improvements—including notably better consistency. Built upon the 20B Qwen-Image model, Qwen-Image-Edit-2511 successfully extends Qwen-Image's unique text rendering capabilities to image editing tasks, enabling precise text editing.
@@ -34,8 +36,6 @@ This section provides deployment configurations optimized for different hardware
 Qwen-Image-Edit-2511 is a 20B parameter model optimized for image editing tasks. The recommended launch configurations vary by hardware.
 
 **Interactive Command Generator**: Use the configuration selector below to automatically generate the appropriate deployment command for your hardware platform.
-
-import { QwenImageEditDeployment } from "/src/snippets/diffusion/qwen-image-edit-deployment.jsx";
 
 <QwenImageEditDeployment />
 
@@ -209,13 +209,13 @@ Test Environment:
 
 **Server Command**:
 
-```text Output
+```shell Command
 sglang serve --model-path Qwen/Qwen-Image-Edit-2511 --port 30000
 ```
 
 **Benchmark Command**:
 
-```text Output
+```shell Command
 python3 -m sglang.multimodal_gen.benchmarks.bench_serving \
     --backend sglang-image --dataset vbench --task ti2i --num-prompts 1 --max-concurrency 1
 ```
@@ -249,7 +249,7 @@ Peak Memory Median (MB):                 47959.35
 
 **Benchmark Command**:
 
-```text Output
+```shell Command
 python3 -m sglang.multimodal_gen.benchmarks.bench_serving \
     --backend sglang-image --dataset vbench --task ti2i --num-prompts 20 --max-concurrency 20
 ```

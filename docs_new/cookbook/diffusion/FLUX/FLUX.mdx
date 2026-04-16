@@ -4,6 +4,8 @@ metatags:
     description: "Deploy FLUX diffusion models with SGLang - 12B/32B rectified flow transformers for high-quality text-to-image generation."
 ---
 
+import { FluxDeployment } from '/src/snippets/diffusion/flux-deployment.jsx';
+
 ## 1. Model Introduction
 
 [FLUX](https://blackforestlabs.ai/) is a family of rectified flow transformer models developed by Black Forest Labs for high-quality image generation from text descriptions.
@@ -42,9 +44,7 @@ This section provides deployment configurations optimized for different hardware
 
 FLUX models are optimized for high-quality image generation. The recommended launch configurations vary by hardware and model version.
 
-**Interactive Command Generator**: Use the configuration selector below to automatically generate the appropriate deployment command for your hardware platform and model version.
-
-import { FluxDeployment } from "/src/snippets/diffusion/flux-deployment.jsx";
+**Interactive Command Generator**: Use the configuration selector below to automatically generate the appropriate deployment command for your hardware platform and model version. SGLang supports serving FLUX on NVIDIA B200, H200, H100, and AMD MI355X, MI325X, MI300X GPUs.
 
 <FluxDeployment />
 
@@ -217,13 +217,13 @@ Test Environment:
 
 **Server Command**:
 
-```text Output
+```shell Command
 sglang serve --model-path black-forest-labs/FLUX.1-dev --port 30000
 ```
 
 **Benchmark Command**:
 
-```text Output
+```shell Command
 python3 -m sglang.multimodal_gen.benchmarks.bench_serving \
     --backend sglang-video --dataset vbench --task t2v --num-prompts 1 --max-concurrency 1
 ```
@@ -257,13 +257,13 @@ Peak Memory Median (MB):                 27905.19
 
 **Server Command** :
 
-```text Output
+```shell Command
 sglang serve --model-path black-forest-labs/FLUX.1-dev --port 30000
 ```
 
 **Benchmark Command** :
 
-```text Output
+```shell Command
 python3 -m sglang.multimodal_gen.benchmarks.bench_serving \
     --backend sglang-image --dataset vbench --task t2v --num-prompts 20 --max-concurrency 20
 ```

@@ -4,6 +4,8 @@ metatags:
     description: "Deploy Wan2.2 video generation models with SGLang - MoE architecture, cinematic aesthetics, and efficient 720P@24fps generation."
 ---
 
+import { Wan22Deployment } from '/src/snippets/diffusion/wan22-deployment.jsx';
+
 ## 1. Model Introduction
 
 [Wan2.2 series](https://github.com/Wan-Video/Wan2.2) are the most popular and open and advanced large-scale video generative models.
@@ -31,15 +33,13 @@ This section provides deployment configurations optimized for different hardware
 
 The Wan2.2 series offers models in various sizes, architectures and input types, optimized for different hardware platforms. The recommended launch configurations vary by hardware and model size.
 
-**Interactive Command Generator**: Use the configuration selector below to automatically generate the appropriate deployment command for your hardware platform, model size.
-
-import { Wan22Deployment } from "/src/snippets/diffusion/wan22-deployment.jsx";
+**Interactive Command Generator**: Use the configuration selector below to automatically generate the appropriate deployment command for your hardware platform, model size. SGLang supports serving Wan2.2 on NVIDIA B200, H200 and AMD MI300X, MI325X and MI355X GPUs.
 
 <Wan22Deployment />
 
 ### 3.2 Configuration Tips
 
-Current supported optimzation all listed [here](https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/docs/support_matrix.md).
+Current supported optimization all listed [here](https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/docs/support_matrix.md).
 
 - `--vae-path`: Path to a custom VAE model or HuggingFace model ID (e.g., fal/FLUX.2-Tiny-AutoEncoder). If not specified, the VAE will be loaded from the main model path.
 - `--num-gpus {NUM_GPUS}`: Number of GPUs to use
@@ -57,7 +57,7 @@ For more API usage and request examples, please refer to:
 
 #### 4.1.1 Launch a server and then send requests
 
-```text Output
+```shell Command
 sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers --port 3000
 
 curl http://127.0.0.1:3000/v1/images/generations \
@@ -75,14 +75,14 @@ curl http://127.0.0.1:3000/v1/images/generations \
 
 #### 4.1.2 Generate a video without launching a server
 
-```text Output
+```shell Command
 SERVER_ARGS=(
   --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers
   --text-encoder-cpu-offload
   --pin-cpu-memory
   --num-gpus 4
   --ulysses-degree=2
-  --ring-degree=2
+  --enable-cfg-parallel
 )
 
 SAMPLING_ARGS=(
@@ -100,11 +100,11 @@ sglang generate "${SERVER_ARGS[@]}" "${SAMPLING_ARGS[@]}"
 
 #### 4.2.1 Cache-DiT Acceleration
 
-SGLang integrates [Cache-DiT](https://github.com/vipshop/cache-dit), a caching acceleration engine for Diffusion Transformers (DiT), to achieve up to 7.4x inference speedup with minimal quality loss. You can set `SGLANG_CACHE_DIT_ENABLED=True` to enable it. For more details, please refer to the SGLang Cache-DiT [documentation](https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/docs/cache_dit.md).
+SGLang integrates [Cache-DiT](https://github.com/vipshop/cache-dit), a caching acceleration engine for Diffusion Transformers (DiT), to achieve up to 7.4x inference speedup with minimal quality loss. You can set `SGLANG_CACHE_DIT_ENABLED=True` to enable it. For more details, please refer to the SGLang Cache-DiT [documentation](https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/docs/cache/cache_dit.md).
 
 **Basic Usage**
 
-```text Output
+```shell Command
 SGLANG_CACHE_DIT_ENABLED=true sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers
 ```
 
@@ -196,7 +196,7 @@ SGLANG_CACHE_DIT_ENABLED=true sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-D
 
   Combined Configuration Example:
 
-```text Output
+```shell Command
 SGLANG_CACHE_DIT_ENABLED=true \
 SGLANG_CACHE_DIT_FN=2 \
 SGLANG_CACHE_DIT_BN=1 \
@@ -240,11 +240,10 @@ sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers
   </tbody>
 </table>
 **Example**:
-```text Output
+```shell Command
 sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers --port 3000 \
     --lora-path Cseti/wan2.2-14B-Arcane_Jinx-lora-v1
 ```
-
 
 ## 5. Benchmark
 
@@ -260,13 +259,13 @@ Test Environment:
 
 **Server Command**:
 
-```text Output
+```shell Command
 sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers
 ```
 
 **Benchmark Command**:
 
-```text Output
+```shell Command
 python3 -m sglang.multimodal_gen.benchmarks.bench_serving \
     --backend sglang-video --dataset vbench --task t2v --num-prompts 1 --max-concurrency 1
 ```
@@ -301,7 +300,7 @@ Peak Memory Median (MB):                 62627.41
 
 **Server Command**:
 
-```text Output
+```shell Command
 SGLANG_CACHE_DIT_ENABLED=true \
 SGLANG_CACHE_DIT_FN=2 \
 SGLANG_CACHE_DIT_BN=1 \
@@ -315,7 +314,7 @@ sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers
 
 **Benchmark Command**:
 
-```text Output
+```shell Command
 python3 -m sglang.multimodal_gen.benchmarks.bench_serving \
     --backend sglang-video --dataset vbench --task t2v --num-prompts 20 --max-concurrency 20
 ```
