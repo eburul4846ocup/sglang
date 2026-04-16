@@ -383,8 +383,6 @@ class LTX2ImageEncodingStage(PipelineStage):
                     self.vae.enable_tiling()
             except Exception:
                 pass
-            if not vae_autocast_enabled:
-                video_condition = video_condition.to(vae_dtype)
             latent_dist = self.vae.encode(video_condition)
             if isinstance(latent_dist, AutoencoderKLOutput):
                 latent_dist = latent_dist.latent_dist
@@ -417,8 +415,6 @@ class LTX2ImageEncodingStage(PipelineStage):
             dtype=vae_dtype,
             enabled=vae_autocast_enabled,
         ):
-            if not vae_autocast_enabled:
-                video_condition = video_condition.to(vae_dtype)
             return self._condition_image_encoder(video_condition)
 
     # -- forward ---------------------------------------------------------
