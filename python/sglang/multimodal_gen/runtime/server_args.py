@@ -321,19 +321,7 @@ class ServerArgs:
 
     def _adjust_offload(self):
         # TODO: to be handled by each platform
-        total_memory_gb = current_platform.get_device_total_memory() / BYTES_PER_GB
-        is_ltx23_model = self._is_ltx23_model_path(
-            self.model_path
-        ) or is_ltx23_native_variant(self.pipeline_config.vae_config.arch_config)
-        is_ltx23_one_stage = (
-            self.pipeline_class_name in (None, "LTX2Pipeline") and is_ltx23_model
-        )
-        is_ltx23_two_stage = (
-            self.pipeline_class_name == "LTX2TwoStagePipeline" and is_ltx23_model
-        )
-        is_ltx23_pipeline = is_ltx23_one_stage or is_ltx23_two_stage
-
-        if total_memory_gb < 30:
+        if current_platform.get_device_total_memory() / BYTES_PER_GB < 30:
             logger.info("Enabling all offloading for GPU with low device memory")
             if self.dit_cpu_offload is None:
                 self.dit_cpu_offload = True
@@ -343,29 +331,6 @@ class ServerArgs:
                 self.image_encoder_cpu_offload = True
             if self.vae_cpu_offload is None:
                 self.vae_cpu_offload = True
-
-        elif is_ltx23_pipeline and total_memory_gb >= 70:
-            if is_ltx23_one_stage:
-                logger.info(
-                    "Disabling DiT CPU offload by default for %s on high-memory GPU (%.1f GiB).",
-                    self.pipeline_class_name,
-                    total_memory_gb,
-                )
-                if self.dit_cpu_offload is None:
-                    self.dit_cpu_offload = False
-            elif self.dit_cpu_offload is None:
-                self.dit_cpu_offload = True
-            if self.text_encoder_cpu_offload is None:
-                self.text_encoder_cpu_offload = True
-            if self.image_encoder_cpu_offload is None:
-                self.image_encoder_cpu_offload = True
-            if self.vae_cpu_offload is None:
-                self.vae_cpu_offload = False
-                logger.info(
-                    "Disabling VAE CPU offload by default for %s on high-memory GPU (%.1f GiB).",
-                    self.pipeline_class_name,
-                    total_memory_gb,
-                )
         elif self.pipeline_config.task_type.is_image_gen():
             logger.info(
                 "Disabling some offloading (except dit, text_encoder) for image generation model"
