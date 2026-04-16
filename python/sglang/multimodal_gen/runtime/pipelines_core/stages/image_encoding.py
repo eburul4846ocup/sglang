@@ -522,15 +522,6 @@ class LTX2ImageEncodingStage(PipelineStage):
         batch.image_latent = packed
         batch.ltx2_num_image_tokens = int(packed.shape[1])
 
-        # PROBE (temporary)
-        logger.info(
-            "PROBE image_latent: shape=%s dtype=%s mean=%.6f std=%.6f first5=%s res=%dx%d",
-            tuple(packed.shape), packed.dtype,
-            packed.float().mean().item(), packed.float().std().item(),
-            packed.flatten()[:5].tolist(),
-            int(batch.width), int(batch.height),
-        )
-
         if batch.debug:
             logger.info(
                 "LTX2 TI2V: %d tokens (shape=%s) for %sx%s",
