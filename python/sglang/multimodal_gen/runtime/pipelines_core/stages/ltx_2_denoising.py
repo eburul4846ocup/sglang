@@ -283,6 +283,14 @@ class LTX2DenoisingStage(DenoisingStage):
         )
         return cls._ltx2_apply_rescale(cond, pred, rescale_scale)
 
+    def _preprocess_sp_latents(self, batch: Req, server_args: ServerArgs):
+        """LTX-2 TI2V applies image_latent in token space *after* SP sharding,
+        so the base implementation must not shard it."""
+        saved = batch.image_latent
+        batch.image_latent = None
+        super()._preprocess_sp_latents(batch, server_args)
+        batch.image_latent = saved
+
     @staticmethod
     def _should_apply_ltx2_ti2v(batch: Req) -> bool:
         """True if we have an image-latent token prefix to condition with.
@@ -290,13 +298,6 @@ class LTX2DenoisingStage(DenoisingStage):
         SP note: when token latents are time-sharded, only the rank that owns the
         *global* first latent frame should apply TI2V conditioning (rank with start_frame==0).
         """
-        # LTX2ImageEncodingStage stores in ltx2_image_latent to avoid
-        # spurious SP sharding; promote to image_latent here (after SP
-        # sharding has already run in _preprocess_sp_latents).
-        ltx2_il = getattr(batch, "ltx2_image_latent", None)
-        if ltx2_il is not None and batch.image_latent is None:
-            batch.image_latent = ltx2_il
-
         if (
             batch.image_latent is None
             or int(getattr(batch, "ltx2_num_image_tokens", 0)) <= 0
