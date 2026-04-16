@@ -509,14 +509,18 @@ class LTX2ImageEncodingStage(PipelineStage):
                 f"{packed.shape[1]=} {expected_tokens=}."
             )
 
-        batch.image_latent = packed
+        # Store in ltx2_image_latent (NOT batch.image_latent) to avoid
+        # spurious SP sharding by _preprocess_sp_latents in the base
+        # denoising loop — the original code populated image_latent *after*
+        # SP sharding had already run.
+        batch.ltx2_image_latent = packed
         batch.ltx2_num_image_tokens = int(packed.shape[1])
 
         if batch.debug:
             logger.info(
                 "LTX2 TI2V: %d tokens (shape=%s) for %sx%s",
                 batch.ltx2_num_image_tokens,
-                tuple(batch.image_latent.shape),
+                tuple(batch.ltx2_image_latent.shape),
                 batch.width,
                 batch.height,
             )
