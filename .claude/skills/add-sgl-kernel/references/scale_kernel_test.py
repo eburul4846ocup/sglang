@@ -1,110 +1,104 @@
-"""Tests for the scale kernel implemented in scale_kernel.cu.
+"""Tests for the scale kernel implementation.
 
-Verifies correctness, edge cases, and performance of the custom
-SGL scale kernel against a PyTorch reference implementation.
+Verifies correctness, edge cases, and error handling for the
+custom CUDA scale kernel via the sgl-kernel Python bindings.
 """
 
 import pytest
 import torch
+from sgl_kernel import scale as sgl_scale
 
 
-def torch_scale(x: torch.Tensor, scale: float) -> torch.Tensor:
-    """Reference PyTorch implementation of the scale operation."""
-    return x * scale
+def torch_scale(x: torch.Tensor, factor: float) -> torch.Tensor:
+    """Reference implementation using PyTorch."""
+    return x * factor
 
 
-try:
-    from sgl_kernel import scale as sgl_scale
-    HAS_SGL_KERNEL = True
-except ImportError:
-    HAS_SGL_KERNEL = False
-
-
-requires_sgl_kernel = pytest.mark.skipif(
-    not HAS_SGL_KERNEL, reason="sgl_kernel not installed"
-)
-requires_cuda = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="CUDA not available"
-)
-
-
-@requires_sgl_kernel
-@requires_cuda
 class TestScaleCorrectness:
-    """Correctness tests comparing sgl_scale to torch_scale."""
+    """Correctness tests comparing sgl_scale against torch reference."""
 
     def test_scale_basic(self):
         x = torch.randn(128, device="cuda", dtype=torch.float32)
-        scale = 2.5
-        expected = torch_scale(x, scale)
-        result = sgl_scale(x, scale)
+        factor = 2.5
+        result = sgl_scale(x, factor)
+        expected = torch_scale(x, factor)
         torch.testing.assert_close(result, expected)
 
     def test_scale_2d(self):
-        x = torch.randn(64, 128, device="cuda", dtype=torch.float32)
-        scale = 0.5
-        expected = torch_scale(x, scale)
-        result = sgl_scale(x, scale)
+        x = torch.randn(32, 64, device="cuda", dtype=torch.float32)
+        factor = 0.5
+        result = sgl_scale(x, factor)
+        expected = torch_scale(x, factor)
         torch.testing.assert_close(result, expected)
 
     def test_scale_fp16(self):
         x = torch.randn(256, device="cuda", dtype=torch.float16)
-        scale = 3.0
-        expected = torch_scale(x, scale)
-        result = sgl_scale(x, scale)
+        factor = 3.0
+        result = sgl_scale(x, factor)
+        expected = torch_scale(x, factor)
         torch.testing.assert_close(result, expected, atol=1e-3, rtol=1e-3)
 
     def test_scale_bf16(self):
         x = torch.randn(256, device="cuda", dtype=torch.bfloat16)
-        scale = 1.5
-        expected = torch_scale(x, scale)
-        result = sgl_scale(x, scale)
+        factor = 1.5
+        result = sgl_scale(x, factor)
+        expected = torch_scale(x, factor)
         torch.testing.assert_close(result, expected, atol=1e-2, rtol=1e-2)
 
-    def test_scale_zero(self):
-        x = torch.randn(64, device="cuda")
-        result = sgl_scale(x, 0.0)
-        torch.testing.assert_close(result, torch.zeros_like(x))
+    def test_scale_negative_factor(self):
+        x = torch.randn(64, device="cuda", dtype=torch.float32)
+        factor = -1.0
+        result = sgl_scale(x, factor)
+        expected = torch_scale(x, factor)
+        torch.testing.assert_close(result, expected)
 
-    def test_scale_negative(self):
-        x = torch.randn(64, device="cuda")
-        scale = -1.0
-        expected = torch_scale(x, scale)
-        result = sgl_scale(x, scale)
+    def test_scale_zero_factor(self):
+        x = torch.randn(64, device="cuda", dtype=torch.float32)
+        factor = 0.0
+        result = sgl_scale(x, factor)
+        expected = torch.zeros_like(x)
         torch.testing.assert_close(result, expected)
 
     def test_scale_large_tensor(self):
-        x = torch.randn(1024, 1024, device="cuda")
-        scale = 0.125
-        expected = torch_scale(x, scale)
-        result = sgl_scale(x, scale)
+        x = torch.randn(1024, 1024, device="cuda", dtype=torch.float32)
+        factor = 0.1
+        result = sgl_scale(x, factor)
+        expected = torch_scale(x, factor)
         torch.testing.assert_close(result, expected)
 
     def test_scale_out_param(self):
-        """Test that the out parameter writes results correctly."""
-        x = torch.randn(128, device="cuda")
+        """Test writing result into a pre-allocated output tensor."""
+        x = torch.randn(128, device="cuda", dtype=torch.float32)
         out = torch.empty_like(x)
-        scale = 2.0
-        sgl_scale(x, scale, out=out)
-        expected = torch_scale(x, scale)
+        factor = 2.0
+        sgl_scale(x, factor, out=out)
+        expected = torch_scale(x, factor)
         torch.testing.assert_close(out, expected)
 
 
-@requires_sgl_kernel
-class TestScaleErrorHandling:
-    """Tests for expected errors and edge cases."""
+class TestScaleErrors:
+    """Error handling and input validation tests."""
 
-    def test_scale_cpu_input_raises(self):
-        """CPU tensors should raise an error — kernel requires CUDA."""
-        x = torch.randn(64, device="cpu")
+    def test_scale_cpu_input(self):
+        """Kernel should raise when given a CPU tensor."""
+        x = torch.randn(64, dtype=torch.float32)  # CPU
         with pytest.raises((RuntimeError, ValueError)):
             sgl_scale(x, 1.0)
 
-    def test_scale_shape_mismatch_raises(self):
-        """Mismatched out shape should raise an error."""
-        if not torch.cuda.is_available():
-            pytest.skip("CUDA not available")
-        x = torch.randn(64, device="cuda")
-        out = torch.empty(128, device="cuda")
+    def test_scale_shape_mismatch(self):
+        """Output tensor shape must match input shape."""
+        x = torch.randn(64, device="cuda", dtype=torch.float32)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
         with pytest.raises((RuntimeError, ValueError)):
             sgl_scale(x, 1.0, out=out)
+
+    def test_scale_dtype_mismatch(self):
+        """Output tensor dtype must match input dtype."""
+        x = torch.randn(64, device="cuda", dtype=torch.float32)
+        out = torch.empty(64, device="cuda", dtype=torch.float16)
+        with pytest.raises((RuntimeError, ValueError)):
+            sgl_scale(x, 1.0, out=out)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
