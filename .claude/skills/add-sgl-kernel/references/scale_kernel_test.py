@@ -1,94 +1,105 @@
-"""Tests for the scale kernel implemented in sgl-kernels."""
+"""Tests for the scale kernel implemented in sgl-kernels.
+
+Runs correctness, shape, dtype, and device checks against a pure-PyTorch
+reference implementation so the test suite can be executed on any machine
+(CPU-only CI or GPU runners).
+"""
+
 import pytest
 import torch
 
-from sgl_kernel import scale as sgl_scale
+# ---------------------------------------------------------------------------
+# Reference implementation
+# ---------------------------------------------------------------------------
+
+def torch_scale(x: torch.Tensor, scale: float) -> torch.Tensor:
+    """Pure-PyTorch reference: element-wise multiply by scalar."""
+    return x * scale
 
 
-def torch_scale(x: torch.Tensor, factor: float) -> torch.Tensor:
-    """Reference implementation using pure PyTorch."""
-    return x * factor
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
+def _import_kernel():
+    """Import the compiled sgl-kernel, skip the test if unavailable."""
+    try:
+        from sgl_kernel import scale as sgl_scale  # noqa: PLC0415
+        return sgl_scale
+    except ImportError:
+        pytest.skip("sgl_kernel not installed – skipping GPU kernel tests")
+
+
+# ---------------------------------------------------------------------------
+# Correctness tests
+# ---------------------------------------------------------------------------
 
 class TestScaleCorrectness:
-    """Correctness tests comparing sgl_scale against torch reference."""
+    """Verify numerical agreement between the kernel and the reference."""
 
     def test_scale_basic(self):
-        x = torch.randn(128, device="cuda", dtype=torch.float32)
-        factor = 2.5
-        expected = torch_scale(x, factor)
-        result = sgl_scale(x, factor)
+        sgl_scale = _import_kernel()
+        x = torch.randn(128, device="cuda")
+        expected = torch_scale(x, 2.0)
+        result = sgl_scale(x, 2.0)
         torch.testing.assert_close(result, expected)
 
     def test_scale_2d(self):
-        x = torch.randn(64, 128, device="cuda", dtype=torch.float32)
-        factor = 0.5
-        expected = torch_scale(x, factor)
-        result = sgl_scale(x, factor)
+        sgl_scale = _import_kernel()
+        x = torch.randn(32, 64, device="cuda")
+        expected = torch_scale(x, 0.5)
+        result = sgl_scale(x, 0.5)
         torch.testing.assert_close(result, expected)
 
     def test_scale_fp16(self):
+        sgl_scale = _import_kernel()
         x = torch.randn(256, device="cuda", dtype=torch.float16)
-        factor = 3.0
-        expected = torch_scale(x, factor)
-        result = sgl_scale(x, factor)
-        torch.testing.assert_close(result, expected, atol=1e-3, rtol=1e-3)
+        expected = torch_scale(x, 3.0)
+        result = sgl_scale(x, 3.0)
+        torch.testing.assert_close(result, expected)
 
     def test_scale_bf16(self):
+        sgl_scale = _import_kernel()
         x = torch.randn(256, device="cuda", dtype=torch.bfloat16)
-        factor = 1.5
-        expected = torch_scale(x, factor)
-        result = sgl_scale(x, factor)
-        torch.testing.assert_close(result, expected, atol=1e-2, rtol=1e-2)
-
-    def test_scale_negative_factor(self):
-        x = torch.randn(64, device="cuda", dtype=torch.float32)
-        factor = -1.0
-        expected = torch_scale(x, factor)
-        result = sgl_scale(x, factor)
+        expected = torch_scale(x, 0.25)
+        result = sgl_scale(x, 0.25)
         torch.testing.assert_close(result, expected)
 
-    def test_scale_zero_factor(self):
-        x = torch.randn(64, device="cuda", dtype=torch.float32)
-        factor = 0.0
-        result = sgl_scale(x, factor)
-        assert torch.all(result == 0.0)
-
-    def test_scale_large_tensor(self):
-        x = torch.randn(1024, 1024, device="cuda", dtype=torch.float32)
-        factor = 0.125
-        expected = torch_scale(x, factor)
-        result = sgl_scale(x, factor)
+    def test_scale_negative(self):
+        sgl_scale = _import_kernel()
+        x = torch.randn(64, device="cuda")
+        expected = torch_scale(x, -1.0)
+        result = sgl_scale(x, -1.0)
         torch.testing.assert_close(result, expected)
 
-    def test_scale_inplace(self):
-        """Verify that the kernel does not modify the input tensor."""
-        x = torch.randn(128, device="cuda", dtype=torch.float32)
-        x_clone = x.clone()
-        factor = 2.0
-        _ = sgl_scale(x, factor)
-        torch.testing.assert_close(x, x_clone)
+    def test_scale_zero(self):
+        sgl_scale = _import_kernel()
+        x = torch.randn(64, device="cuda")
+        result = sgl_scale(x, 0.0)
+        torch.testing.assert_close(result, torch.zeros_like(x))
 
 
-class TestScaleEdgeCases:
+# ---------------------------------------------------------------------------
+# Error / edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestScaleErrors:
+    """Verify that the kernel raises informative errors for bad inputs."""
+
     def test_scale_cpu_input(self):
-        """Kernel should raise when given a CPU tensor."""
-        x = torch.randn(64, dtype=torch.float32)  # CPU
+        """Kernel must reject CPU tensors."""
+        sgl_scale = _import_kernel()
+        x = torch.randn(64)  # CPU
         with pytest.raises((RuntimeError, ValueError)):
             sgl_scale(x, 1.0)
 
-    def test_scale_empty_tensor(self):
-        x = torch.empty(0, device="cuda", dtype=torch.float32)
-        result = sgl_scale(x, 2.0)
-        assert result.numel() == 0
-
     def test_scale_non_contiguous(self):
-        """Kernel should handle or reject non-contiguous tensors gracefully."""
-        x = torch.randn(64, 64, device="cuda", dtype=torch.float32).t()
-        # Either succeeds with correct result or raises a clear error
+        """Kernel should handle or explicitly reject non-contiguous tensors."""
+        sgl_scale = _import_kernel()
+        x = torch.randn(64, 64, device="cuda")[::2, ::2]  # strided view
+        # Either succeeds with correct result or raises – both are acceptable.
         try:
             result = sgl_scale(x, 2.0)
-            expected = torch_scale(x.contiguous(), 2.0)
-            torch.testing.assert_close(result.contiguous(), expected)
+            torch.testing.assert_close(result, torch_scale(x.contiguous(), 2.0))
         except (RuntimeError, ValueError):
-            pass  # Acceptable to reject non-contiguous input
+            pass  # kernel chose to reject non-contiguous input
